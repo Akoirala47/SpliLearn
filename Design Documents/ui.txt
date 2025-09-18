@@ -1,0 +1,70 @@
+UI Theme:
+1. Design Principles
+Minimalist but Playful → clean UI, generous whitespace, subtle gradients
+Engaging but Focused → animations are soft, not distracting
+Liquid Glass Aesthetic → translucent panels, frosted blur, layered depth
+Consistency → same system for dashboard, study guide, and Let’s Learn
+2. Color Palette
+Balanced between calm + stimulating.
+Primary: #4E9AF1 (calm sky blue, learning focus)
+Secondary: #A86CF5 (playful lavender accent)
+Background Light Mode: #F7F9FC (soft paper-white)
+Background Dark Mode: #10121A (matte dark)
+Surface Panels (Glass): White/black with 0.7 opacity + backdrop blur
+Accent Highlights: Gradient blends (blue → purple, subtle, liquid feel)
+Success/Progress: #4CC38A (mint green)
+3. Typography
+Headings: Rounded Sans (e.g., SF Pro Rounded, Inter Rounded, or Google’s Plus Jakarta Sans) → gives the “bubbly serious” vibe
+Body Text: Neutral Sans (e.g., Inter, SF Pro, or Work Sans)
+Notes Editor: Monospace-like style (Fira Code or JetBrains Mono) for clarity
+Weights:
+Headings → medium/bold
+Body → regular
+Notes → regular/medium
+4. Components Styling
+Cards & Panels
+Rounded corners: 2xl (smooth, friendly)
+Subtle shadows: blurred, spread, low opacity
+Glassmorphism: backdrop blur (blur-md), 70% opacity panels
+Depth layers: floating panels stacked, like translucent sticky notes
+Buttons
+Primary: Glass with gradient border (blue → purple)
+Hover: subtle inner glow, slightly raised
+Secondary: Simple ghost buttons with rounded corners
+Inputs
+Soft pill-shaped inputs with frosted effect
+Focused state: glowing outline in theme gradient
+Navigation (Tabs + Sidebar)
+Minimal bottom or side nav
+Active tab → glassy pill highlight with gradient border
+Icons: Rounded line icons (lucide-react works well with slight customization)
+5. Animations
+Framer Motion everywhere:
+Smooth slide/expand for topic outlines
+Fade + blur transitions for modals
+Bounce-in for list/gallery cards in Let’s Learn
+Video → Notes split screen:
+Slide animation (panel expands smoothly, glass blur increases)
+Notes typing → soft ripple highlight behind cursor (subtle, non-distracting)
+6. Let’s Learn Tab Specific UI
+List View:
+Rows with glass panels, thumbnail left, title + progress right, Start button (gradient pill)
+Progress bar under each row (blue → purple gradient)
+Gallery View:
+Card layout with frosted-glass thumbnails
+Hover → floating card effect
+Split Screen Mode:
+Left Panel (Video): Glass container with rounded corners, darkened backdrop for focus
+Right Panel (Notes): White frosted glass with soft lined background (like subtle notebook paper texture)
+Floating Controls: Small circular buttons (pause, next, resume) in bottom corner, minimal UI
+7. Dark Mode
+Background: Deep matte black (#10121A) with liquid gradients subtly in motion (blue → purple wave animations at 5% opacity)
+Panels: Dark glass (rgba(20,20,20,0.7)) with frosted blur
+Text: White with 80-90% opacity for soft contrast
+Notes area: Slightly lighter panel (like dark chalkboard)
+8. Mood Board References
+iOS 16/17 Control Center blur effects
+Notion’s minimal workspace
+Duolingo’s “fun but focused” aesthetic (less exaggerated)
+Linear.app’s clean SaaS feel
+Apple’s Music “Now Playing” blur cards
