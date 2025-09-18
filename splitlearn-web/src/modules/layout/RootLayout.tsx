@@ -27,7 +27,7 @@ export function RootLayout() {
           <div className="flex-1" />
           <div className="glass flex items-center gap-2 px-3 py-2 rounded-full">
             <Search className="h-4 w-4 opacity-60" />
-            <input placeholder="Search" className="bg-transparent outline-none" />
+            <input placeholder="Search" className="bg-transparent outline-none placeholder:opacity-70" />
           </div>
         </header>
         <main>
@@ -43,7 +43,7 @@ function navClass(isActive: boolean) {
     'flex items-center gap-2 px-3 py-2 rounded-full ' +
     (isActive
       ? 'brand-gradient text-white'
-      : 'hover:bg-black/5 dark:hover:bg-white/5')
+      : 'hover:bg-black/10 dark:hover:bg-white/10')
   )
 }
 

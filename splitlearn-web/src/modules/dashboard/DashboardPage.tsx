@@ -1,7 +1,7 @@
 export function DashboardPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold" style={{ fontFamily: 'var(--font-heading)' }}>
+      <h1 className="text-3xl md:text-4xl font-semibold text-neutral-950 dark:text-black" style={{ fontFamily: 'var(--font-heading)' }}>
         Welcome back
       </h1>
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
