@@ -1,475 +1,159 @@
-# Design System — “Liquid Studio”
+# 🌌 Obsidian Flow: LuminaLearn — Design Language
 
-**One-line brand brief:** Calm focus with playful warmth — a minimalist interface that feels tactile and translucent, like learning through frosted glass.
+## 1. Design Philosophy
 
----
-
-## 1) Core design principles (expanded)
-
-* **Minimalist but Playful**
-
-  * Generous whitespace, simple layouts, few competing focal points.
-  * Add playful accents via color gradients, micro-bounces, and small rounded shapes — never clutter.
-* **Engaging but Focused**
-
-  * Motion is informative, not decorative: transitions show hierarchy (open → expand, toggle → morph).
-  * Use motion to guide attention to changes (progress updates, video controls) but respect `prefers-reduced-motion`.
-* **Liquid Glass Aesthetic**
-
-  * Use translucent panels (70% opacity) + `backdrop-filter: blur(...)`.
-  * Layer multiple glass surfaces to create depth: background → mid-layer content → floating controls.
-* **Consistency**
-
-  * One system across Dashboard / Study Guide / Let’s Learn. Use shared tokens (colors, spacing, elevation).
-  * Create component variants rather than unique components per page.
+* **Focused Immersion** → The UI dissolves away, leaving only content (video, notes, progression).
+* **Fluid Interactions** → Every state change feels like water flowing: dissolves, ripples, soft morphs.
+* **Encouraging Progression** → Progress is always visible but never loud — glowing bars, ripple checkmarks, subtle milestone celebrations.
+* **Playful Sophistication** → Dark, serious foundation with playful glowing accents (blue/violet/green) used sparingly for delight.
 
 ---
 
-## 2) Color system (tokens + guidance)
+## 2. Color System (Refined)
 
-### Core tokens
+### Core Palette
 
-```css
-:root{
-  --bg-light: #F7F9FC;
-  --bg-dark:  #10121A;
+* **Background Deep**: `#05050C` → near-absolute black (canvas).
+* **Liquid Glass Base**: `#1A1A2E` @ 70% opacity + blur (main panel material).
+* **Lumina Blue** (Primary): `#007AFF` → electric glowing blue (actions, progress).
+* **Success Green**: `#34C759` → emerald glow (completion, achievements).
+* **Insight Violet**: `#AF52DE` → deep violet (secondary highlights, knowledge points).
+* **Text Primary**: `#F0F0F0` (luminous white).
+* **Text Secondary**: `#A0A0A0` (soft neutral grey).
 
-  --primary: #4E9AF1;
-  --primary-contrast: #3C78BB; /* dark shade for accessible white text */
-  --accent:  #A86CF5;
+### Glow & Shadow Rules
 
-  --success: #4CC38A;
-  --danger:  #FF6B6B;
-  --muted:   #9AA6B2;
-
-  --glass-light: rgba(255,255,255,0.70);
-  --glass-dark: rgba(20,20,20,0.70);
-  --backdrop-blur: 12px;
-
-  --gradient: linear-gradient(90deg,var(--primary),var(--accent));
-}
-```
-
-### Gradients (liquid feel)
-
-* `--gradient` = `linear-gradient(90deg, #4E9AF1 0%, #A86CF5 100%)` — used for borders, highlights, and progress fills.
-* Use **subtle diagonal** and **soft stop changes** to avoid harsh color bands.
-
-### Semantic colors and accessibility notes
-
-* Body text (light mode): `#0F1724` (contrast > 16:1 on `--bg-light`) — very readable.
-* Body text (dark): `#FFFFFF` with 85–95% opacity (for softer contrast).
-* **Important:** `#4E9AF1` on `#F7F9FC` is low contrast (\~2.8:1) — don’t use primary for small body copy on light backgrounds. For buttons with white text, use `--primary-contrast` (`#3C78BB`) which reaches WCAG AA for white text.
-* Success color `#4CC38A` is great on dark surfaces; on light backgrounds it’s low contrast — use darker success variants for small text/labels.
-
-*(I checked numeric contrast ratios to ensure accessibility thresholds are met — recommended filled-blue buttons should use a darker stop for readable white text.)*
-
-### Color usage rules
-
-* **Primary**: interactive accents, icons, small UI highlights, gradient borders.
-* **Primary-contrast**: filled primary buttons (white text), CTA backgrounds when necessary.
-* **Accent (lavender)**: secondary CTA, micro-interactions (toggles, badges).
-* **Backgrounds**: use subtle tonal differences, avoid full pure white for primary surfaces; the glass panels provide depth.
-* **Feedback**: success (#4CC38A), warning (#FFB86B), error (#FF6B6B). Provide darker shades for text on light backgrounds.
+* **Active Glow**: outer glow (`0 0 12px Lumina Blue`) for active buttons/tabs.
+* **Success Glow**: soft ripple outward (`0 0 10px Success Green`) on completion.
+* **Violet Halo**: subtle inner-shadow with `Insight Violet` for optional/secondary cues.
 
 ---
 
-## 3) Typography system
+## 3. Typography System
 
-**Typeface choices**
+* **Headings**: Rounded geometric sans (Plus Jakarta Sans Rounded / Inter Rounded) — luminous, friendly, but strong.
+* **Body**: Inter / Work Sans — clean, neutral.
+* **Notes Editor**: Fira Code / JetBrains Mono — monospaced, with subtle violet highlights for markdown.
 
-* Headings: **Plus Jakarta Sans / Inter Rounded / SF Pro Rounded** (rounded, friendly).
-* Body: **Inter / SF Pro / Work Sans** (neutral).
-* Notes editor: **Fira Code / JetBrains Mono** (monospace-like for alignment & clarity).
+**Scale (Dark UI optimized)**
 
-**Scale (base = 16px)**
+* H1 → 40px, glowing edge subtle
+* H2 → 32px
+* H3 → 24px
+* Body → 16px
+* Caption → 13px
 
-```
-H1  40px / 48px  (xl display)
-H2  32px / 40px
-H3  24px / 32px
-H4  20px / 28px
-Body 16px / 24px
-Small 14px / 20px
-Caption 12px / 16px
-Mono (notes) 14px / 20px (Fira Code)
-```
-
-* Line heights: headings \~1.08–1.25, body \~1.5.
-* Letter spacing: normal → headings +0.2px for rounded fonts.
-
-**Weights**
-
-* Headings: 600–700
-* Body: 400
-* Notes: 400–500 (monospace medium for emphasis)
-
-**Webfont loading**
-
-* Use `font-display: swap` to avoid FOIT. Provide system fallback stack.
+Use **slight text glow (blue/violet)** for headings in active contexts (like course titles).
 
 ---
 
-## 4) Layout, spacing & grid
+## 4. Layout System
 
-* Base spacing unit: **8px** (scale multiples: 4px, 8px, 12px, 16px, 24px, 32px, 48px).
-* Grid: 12-column fluid grid (max-width container 1280px, margins adjust at breakpoints).
-* Corner radius: `2xl` → \~**16–20px** (rounded, friendly).
-* Edge padding: large cards use 24–32px, small chips 8–12px.
+* **Dashboard/Home** → 2-column grid (main path cards left, quick links + milestones right).
+* **Lesson Browser** → Toggle list/gallery view with minimalist pill buttons.
+* **Split Screen** → 60/40 split (video/notes), draggable divider with glowing Lumina Blue hover.
+* **Panels** → All major UI in frosted liquid glass (`#1A1A2E70` + blur-md).
 
-**Breakpoints (suggested)**
+**Hierarchy**:
 
-* `sm`: 640px
-* `md`: 768px
-* `lg`: 1024px
-* `xl`: 1280px
-* `2xl`: 1440px+
+* Top nav minimal (icon-only sidebar or floating).
+* Dashboard cards = big, glowing pathfinders.
+* Lesson rows = sleek, immersive panes.
 
 ---
 
-## 5) Elevation & glass
+## 5. Components
 
-**Shadows (glass-friendly)**
+### 🟦 Primary Action Button
 
-* `elevation-1`: `0 6px 18px rgba(6,10,15,0.06)`
-* `elevation-2`: `0 10px 32px rgba(6,10,15,0.08)`
-* `elevation-3` (floating): `0 20px 60px rgba(6,10,15,0.12)`
-
-**Glass panel recipe**
-
-* Light glass: `background: rgba(255,255,255,0.70); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08);`
-* Dark glass: `background: rgba(20,20,20,0.70); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.04);`
-
-**Fallback**: for browsers without `backdrop-filter`, increase `background` opacity slightly (0.85), add a subtle inner shadow and a soft border.
-
----
-
-## 6) Components — styling + code patterns
-
-Below are **practical component recipes** and small code examples. I use Tailwind utility names where appropriate — easily adaptable.
-
-### A) Primary gradient glass button (glass + gradient border)
-
-* Visual: translucent fill, gradient border, subtle inner glow on hover.
-* Accessibility: use `--primary-contrast` for filled variant if using white text.
-
-**CSS (vanilla)**
-
-```css
-.btn-glass {
-  position: relative;
-  border-radius: 14px;
-  padding: 10px 18px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-  backdrop-filter: blur(6px);
-  border: 1px solid transparent;
-}
-.btn-glass::before {
-  content: "";
-  position: absolute; inset: -1px;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(90deg,#4E9AF1,#A86CF5);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-.btn-glass .label { position: relative; z-index: 1; }
-.btn-glass:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(78,154,241,0.08); }
-```
-
-**Tailwind variant (approx)**
+* **Style**: dark glass base + glowing Lumina Blue border.
+* **Hover**: faint ripple outward, inner glow intensifies.
+* **Active**: ripple animation expands outward.
 
 ```html
-<button class="relative rounded-2xl px-5 py-2.5 bg-white/6 backdrop-blur-md">
-  <span class="absolute -inset-px rounded-2xl bg-gradient-to-r from-[#4E9AF1] to-[#A86CF5] opacity-70 blur-sm"></span>
-  <span class="relative text-sm font-semibold text-[#0F1724]">Start</span>
+<button class="relative px-5 py-2.5 rounded-2xl bg-[#1A1A2E]/70 backdrop-blur-md border border-[#007AFF]/60 shadow-[0_0_12px_#007AFF80] hover:shadow-[0_0_20px_#007AFF] transition">
+  <span class="text-[#F0F0F0] font-medium">Start Lesson</span>
 </button>
 ```
 
-*(Use darker contrast text `#0F1724` or `--primary-contrast` for filled dark gradient cases.)*
-
 ---
 
-### B) Card / List Row (Let’s Learn)
+### 📖 Lesson Card (List View)
 
-* Structure: left thumbnail (56–96px), center title / meta, right actions (Start pill + progress).
-* Visual: glass panel, rounded corners, soft shadow, progress bar under main row.
-* Progress bar: short height (6px), gradient fill, accessible labels for screen readers.
-
-**HTML sketch**
+* **Default**: dark glass row, thumbnail, title, type icon, progress.
+* **Hover**: expands slightly, subtle Lumina Blue glow.
+* **Progress Bar**: liquid fill animation → Lumina Blue → Success Green when completed.
 
 ```html
-<div class="card glass rounded-2xl p-4 flex items-center gap-4">
-  <img class="w-20 h-12 rounded-lg object-cover" src="thumb.jpg" alt="">
+<div class="group flex items-center gap-4 p-4 rounded-2xl bg-[#1A1A2E]/70 backdrop-blur-md border border-white/5 transition transform hover:scale-[1.02] hover:shadow-[0_0_18px_#007AFF50]">
+  <img class="w-20 h-12 rounded-lg object-cover" src="thumb.jpg" />
   <div class="flex-1">
-    <div class="flex items-center justify-between">
-      <h4 class="text-lg font-semibold">Lesson Title</h4>
-      <button class="btn-pill">Start</button>
-    </div>
-    <p class="text-sm text-muted mt-2">2h • Intermediate</p>
-    <div class="mt-3">
-      <div aria-hidden class="h-2 rounded-full bg-white/10">
-        <div class="h-2 rounded-full" style="width:45%;background:linear-gradient(90deg,#4E9AF1,#A86CF5)"></div>
-      </div>
+    <h4 class="text-lg font-semibold text-[#F0F0F0]">Lesson Title</h4>
+    <div class="h-2 mt-2 rounded-full bg-[#ffffff15]">
+      <div class="h-2 rounded-full bg-gradient-to-r from-[#007AFF] to-[#34C759] transition-all duration-700" style="width:45%"></div>
     </div>
   </div>
 </div>
 ```
 
-### C) Split-screen Video + Notes
+---
 
-* Layout: 60/40 (desktop) or stacked (mobile).
-* Video container: dark glass, rounded corners, shadow, minimal overlay controls.
-* Notes: white frosted glass with subtle ruled-paper pattern (light lined background), monospace font, soft caret ripple animation for typing.
+### 🎥 Split-Screen Player + Notes
 
-**UX details**
+* **Video**: embedded in dark glass container. Controls appear on hover as glowing, semi-transparent buttons.
+* **Notes**: frosted glass editor with monospaced font, subtle ripple glow following cursor.
+* **Divider**: thin, glowing Lumina Blue bar that lights up on hover, draggable.
 
-* When expanding video: panel grows, backdrop-blur increases, secondary content dims (opacity 0.25).
-* Controls: small circular buttons bottom-left / bottom-right with glass backdrop.
-* Keyboard: `Tab` cycles through controls, `Space` toggles play/pause, `Ctrl+Enter` add note.
-
-**Notes editor style**
-
-* Background: `linear-gradient(transparent, rgba(0,0,0,0.02))` with subtle dotted/ruled overlay.
-* Use a soft monospaced font and clear line spacing.
-* Autosave indicator: tiny frosted chip that pulses on save.
+Micro-detail: when typing, a **soft ripple** expands behind the caret.
 
 ---
 
-## 7) Iconography & imagery
+### 🏆 Achievement Badge
 
-* **Icons**: Rounded line icons (lucide-react recommended) with slight stroke smoothing. Keep 20–24px icon sizes for toolbar, 28–36px for major actions.
-* **Thumbnails**: soft, rounded rectangles 8–12px radius. Use blurred thumbnail preview for background-depth effect.
-* **Illustrations**: minimal, flat with soft gradients; use sparingly for empty states.
-
----
-
-## 8) Motion & interaction system (Framer Motion friendly)
-
-**Easings & durations**
-
-* `--ease-in-out`: `cubic-bezier(.22,.98,.51,.99)` (soft)
-* **Durations**
-
-  * Micro interactions: 120–180ms (hover, subtle bounce)
-  * Mid-level: 240–360ms (tab switch, small modal)
-  * Major: 450–600ms (expand, page transitions)
-* **Key rules**
-
-  * Enter/exit: ease out for entering; ease in for leaving.
-  * Use staggered staggerChildren for list reveals (stagger 0.04–0.08s).
-  * Respect `prefers-reduced-motion: reduce` and supply instant (no-transform) fallback.
-
-**Examples:**
-
-* Slide/expand for topic outlines: `y: -8 -> 0, opacity: 0 -> 1, duration 320ms`
-* Modal: fade + blur: `backdrop-filter: blur(4px)` → `blur(12px)` with opacity 0 -> 1.
-* Bounce-in for cards: `scale: 0.96 -> 1.02 -> 1` (spring with low damping)
-
-**Framer Motion variants (example)**
-
-```js
-export const listItem = {
-  hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.32, ease: [0.22,0.98,0.51,0.99] } }
-};
-export const modal = {
-  hidden: { opacity: 0, backdropFilter: "blur(4px)" },
-  visible: { opacity: 1, backdropFilter: "blur(12px)", transition: { duration: 0.36 } }
-};
-```
+* **Appearance**: circular crystal-like glass badge, glowing Success Green checkmark.
+* **Animation**: ripple outward + shimmer when unlocked.
 
 ---
 
-## 9) Let’s Learn — page specifics
+## 6. Animations & Micro-interactions
 
-### List view
+* **Ripple Press**: every button tap sends a faint liquid ripple across the surface.
+* **Tab Switch**: dissolve/reform transition (opacity + blur + ripple wave).
+* **Progress Fill**: smooth “liquid pour” rather than linear bar fill.
+* **Milestones**: shimmering wave + ripple burst around the icon.
+* **Notes Cursor Glow**: Lumina Blue pulse follows cursor while typing.
 
-* **Row**: glass panel, thumbnail, title, progress pill, start button
-* **Progress**: gradient bar below row; percent label on right (visually hidden for screen readers, supply `aria-label="Progress 45%"`).
-* Interaction: hover lifts (translateY -6px), small shimmer on progress when updating.
+**Motion Parameters**
 
-### Gallery view
+* Ease: `cubic-bezier(.25,.8,.25,1)` (fluid).
+* Durations:
 
-* Masonry grid with 12–16px gaps, frosted thumbnails, hover → float + slight rotate (-1 to 1 deg), soft shadow.
-* Card content revealed on hover: quick meta fade-in (duration 120ms).
-
-### Split screen / Study mode
-
-* Focus mode button collapses everything else and expands video to 70% width; notes dock to the right.
-* When resizable, animate width easing for smoothness.
-* Notes synchronize: highlight sections of transcript when timestamp clicked — use micro-animations to briefly pulse the note.
+  * Micro (hover, taps): 180–220ms
+  * Mid (progress, cards): 400–600ms
+  * Major (tab/page transitions): 600–800ms
 
 ---
 
-## 10) Dark mode rules
+## 7. Sidebar Navigation — “Let’s Learn”
 
-* Background: `#10121A` deep matte.
-* Panels: `rgba(20,20,20,0.7)` with `backdrop-filter: blur(12px)`.
-* Text: white 85–95% opacity for body; use `#D6E3FF`/soft blue for headings if you want to add warmth.
-* Accent motion: subtle animated liquid gradient (CSS animation at 3–8% opacity) to create gently moving background without distraction.
-* Notes area: slightly lighter panel (simulate chalkboard) — keep high readability.
+* Icons: book (Courses), beaker (Labs), trophy (Achievements).
+* **Active Tab**: glowing Lumina Blue halo + animated underline ripple.
+* **Inactive Tabs**: soft white-grey with faint hover glow.
 
----
-
-## 11) Accessibility checklist (must-follow)
-
-* All interactive elements must be keyboard focusable and show visible focus ring (use gradient outline or 3px solid ring).
-* Contrast:
-
-  * Body text >= 4.5:1 (normal); headings >= 3:1 allowed if large text (≥ 18pt / 24px).
-  * Buttons & CTA text must meet WCAG AA — use `--primary-contrast` for filled buttons with white text.
-* Provide `aria-label`s for icon-only buttons.
-* For progress components: ensure `role="progressbar"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax`.
-* Respect `prefers-reduced-motion` (no non-essential motion; instant transforms).
+Transition: tabs dissolve into liquid glass and reform when switching.
 
 ---
 
-## 12) Design tokens JSON (starter)
+## 8. Accessibility & Clarity
 
-```json
-{
-  "color": {
-    "background": { "light": "#F7F9FC", "dark": "#10121A" },
-    "primary": "#4E9AF1",
-    "primaryContrast": "#3C78BB",
-    "accent": "#A86CF5",
-    "success": "#4CC38A"
-  },
-  "radius": {
-    "lg": "12px",
-    "xl": "16px",
-    "2xl": "20px"
-  },
-  "spacing": { "base": 8, "sm": 4, "md": 16, "lg": 24, "xl": 32 },
-  "shadow": {
-    "1": "0 6px 18px rgba(6,10,15,0.06)",
-    "2": "0 10px 32px rgba(6,10,15,0.08)"
-  },
-  "blur": { "md": "12px" }
-}
-```
+* **Contrast**: Lumina Blue (#007AFF) on black (#05050C) has \~8.5:1 ratio → excellent.
+* **Success Green & Violet**: use with larger text/icons only; not for small body text.
+* **Keyboard**: glowing outline ring (Lumina Blue) on focus.
+* **Motion Prefs**: `prefers-reduced-motion` → replace ripples with instant color/opacity changes.
 
 ---
 
-## 13) Tailwind config sketch (custom tokens)
+## 9. Mood & Atmosphere
 
-```js
-// tailwind.config.js (excerpt)
-module.exports = {
-  theme: {
-    extend: {
-      colors: {
-        primary: '#4E9AF1',
-        primaryContrast: '#3C78BB',
-        accent: '#A86CF5',
-        success: '#4CC38A',
-      },
-      borderRadius: {
-        '2xl': '20px',
-      },
-      backdropBlur: {
-        md: '12px',
-      },
-      boxShadow: {
-        'glass-lg': '0 20px 60px rgba(6,10,15,0.12)',
-      }
-    }
-  }
-}
-```
-
----
-
-## 14) Implementation notes & pitfalls
-
-* **Backdrop-filter**: Great effect but check mobile performance. Provide fallback: slightly opaque background + border + inset-shadow.
-* **Gradients**: Avoid using gradient fills for long text bodies; use them for small areas (borders, progress).
-* **Performance**: limit the number of large blurred surfaces; prefer single large background-blur and use translucent panels on top.
-* **Testing**: verify color contrast in both modes, on real devices (OLED vs LCD can show colors differently).
-
----
-
-## 15) Tiny finishing touches (delighters)
-
-* **Typing ripple**: a translucent, very soft radial gradient behind the caret that grows/shrinks with typing speed.
-* **Micro-anchors**: when a lesson is resumed, animate a soft ripple on the row and scroll to it with easing.
-* **Save toast**: frosted, very small pill at bottom-center with checkmark and “Saved” — fades in from bottom with blur increase.
-* **Audio waveform**: subtle, low-contrast waveform behind video controls that animates when audio is playing.
-* **Empty state**: playful illustration using primary + accent, short friendly copy (“No lessons yet — start your first Spark!”).
-
----
-
-## 16) Implementation-ready React snippets
-
-### PrimaryButton (Tailwind + Framer Motion)
-
-```jsx
-// PrimaryButton.jsx
-import { motion } from "framer-motion";
-
-export default function PrimaryButton({ children, onClick }) {
-  return (
-    <motion.button
-      onClick={onClick}
-      whileHover={{ y: -3, boxShadow: "0 12px 40px rgba(78,154,241,0.08)" }}
-      whileTap={{ scale: 0.98 }}
-      className="relative overflow-hidden rounded-2xl px-5 py-2.5 bg-white/6 backdrop-blur-md"
-      aria-label="Primary action"
-    >
-      <span className="absolute -inset-px rounded-2xl bg-gradient-to-r from-[#4E9AF1] to-[#A86CF5] opacity-70 blur-sm"></span>
-      <span className="relative text-sm font-semibold text-[#0F1724]">{children}</span>
-    </motion.button>
-  );
-}
-```
-
-### GlassCard (simple)
-
-```jsx
-export function GlassCard({ thumb, title, meta, progress }) {
-  return (
-    <div className="rounded-2xl p-4 flex items-center gap-4 bg-white/7 backdrop-blur-md shadow-lg">
-      <img src={thumb} alt="" className="w-20 h-12 rounded-lg object-cover" />
-      <div className="flex-1">
-        <div className="flex items-center justify-between">
-          <h4 className="text-lg font-semibold">{title}</h4>
-          <button className="px-4 py-2 rounded-full bg-white/10 text-sm">Start</button>
-        </div>
-        <p className="text-sm text-muted mt-1">{meta}</p>
-        <div className="mt-3 h-2 rounded-full bg-white/10">
-          <div className="h-2 rounded-full" style={{ width: `${progress}%`, background: "linear-gradient(90deg,#4E9AF1,#A86CF5)" }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-```
-
----
-
-## 17) Handoff & tooling (practical)
-
-* **Design tokens**: maintain JSON + CSS variable sources of truth; deliver to engineers.
-* **Figma**: set up color tokens, text styles, and components (Variants) for Buttons, Cards, Tabs, Progress, and Video-Notes split.
-* **Storybook**: build components in isolation with knobs for light/dark and motion toggles.
-* **Testing**: automated visual regression (Percy/Chromatic) for motion & layout changes.
-
----
-
-## 18) Example pages & flows (short)
-
-* **Dashboard**: hero glass panel with progress wheel (mint green progress), next lesson card carousel (frosted).
-* **Study Guide**: collapsible learning sections — use slide/expand with small micro-badges indicating completion.
-* **Let’s Learn**: default to List View (fast scanning), Gallery as discovery, Split Screen for deep study. Provide persistent small controls (mini-player) when scrolling.
-
----
-
-## Final notes — style voice & copy
-
-* Keep microcopy friendly and human: “Resume lesson”, “Mark done”, “Take quick notes”.
-* CTA voice: action-first, short: “Start”, “Continue”, “Try now”.
-* Empty state voice: playful but encouraging: “No lessons yet — pick a topic and get a 5-minute win!”
-
+* **Background**: pure black with **subtle animated gradients** (Lumina Blue → Violet wave at 5% opacity).
+* **Overall Feel**: like studying in a futuristic obsidian-glass workspace, with glowing knowledge nodes lighting up as you progress.

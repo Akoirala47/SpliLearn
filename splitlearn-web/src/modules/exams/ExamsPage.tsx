@@ -34,13 +34,25 @@ export function ExamsPage() {
         <button className="btn-pill disabled:opacity-40" disabled={!canCreate} onClick={() => { if (canCreate) { createExam.mutate(newTitle.trim()); setNewTitle('') } }}>Add</button>
       </div>
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
-        {(exams || []).map((e) => (
-          <Link key={e.id} to={`/exams/${e.id}`} className="glass p-4 rounded-2xl block">
-            <input className="w-full bg-transparent outline-none text-white text-lg font-medium" value={e.title} onChange={(ev) => { ev.preventDefault(); updateExam.mutate({ id: e.id, title: ev.target.value }) }} />
-            <div className="text-sm opacity-70">{e.date ?? 'No date'}</div>
-            <div className="mt-2 flex justify-end"><button className="px-3 py-1 rounded-md bg-white/10" onClick={(ev) => { ev.preventDefault(); deleteExam.mutate(e.id) }}>Delete</button></div>
-          </Link>
-        ))}
+        {(exams || []).map((e) => {
+          const isOptimistic = e.id.startsWith('optimistic-')
+          const Card: any = isOptimistic ? 'div' : Link
+          const cardProps = isOptimistic ? {} : { to: `/exams/${e.id}` }
+          return (
+            <Card key={e.id} {...cardProps} className="glass p-4 rounded-2xl block">
+              <input
+                className="w-full bg-transparent outline-none text-white text-lg font-medium"
+                value={e.title}
+                onChange={(ev) => { ev.preventDefault(); updateExam.mutate({ id: e.id, title: ev.target.value }) }}
+                disabled={isOptimistic}
+              />
+              <div className="text-sm opacity-70">{isOptimistic ? 'Saving…' : (e.date ?? 'No date')}</div>
+              <div className="mt-2 flex justify-end">
+                <button className="px-3 py-1 rounded-md bg-white/10" onClick={(ev) => { ev.preventDefault(); if (!isOptimistic) deleteExam.mutate(e.id) }} disabled={isOptimistic}>Delete</button>
+              </div>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )
