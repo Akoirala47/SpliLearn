@@ -14,6 +14,7 @@ import { LoginPage } from './modules/auth/LoginPage'
 import { Protected } from './modules/auth/Protected'
 import { OnboardingGate } from './modules/onboarding/OnboardingGate'
 import { ProfilePage } from './modules/profile/ProfilePage'
+import { ToastProvider } from './modules/ui/Toast'
 
 const queryClient = new QueryClient()
 
@@ -47,7 +48,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,

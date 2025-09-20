@@ -94,3 +94,5 @@ body { background: var(--color-bg-dark); color: rgba(255,255,255,0.92); font-fam
 @media (prefers-reduced-motion: reduce) {
   .motion-soft { transition: none !important; }
 }
+
+@keyframes progressIndeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
