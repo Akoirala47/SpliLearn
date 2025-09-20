@@ -9,19 +9,36 @@ import { ClassesPage } from './modules/classes/ClassesPage'
 import { ExamsPage } from './modules/exams/ExamsPage'
 import { ExamDetailPage } from './modules/exams/ExamDetailPage'
 import { LearnPage } from './modules/learn/LearnPage'
+import { AuthProvider } from './modules/auth/AuthContext'
+import { LoginPage } from './modules/auth/LoginPage'
+import { Protected } from './modules/auth/Protected'
+import { OnboardingGate } from './modules/onboarding/OnboardingGate'
+import { ProfilePage } from './modules/profile/ProfilePage'
 
 const queryClient = new QueryClient()
 
 const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
-    element: <RootLayout />,
+    element: <Protected />,
     children: [
-      { index: true, element: <DashboardPage /> },
-      { path: 'classes', element: <ClassesPage /> },
-      { path: 'exams', element: <ExamsPage /> },
-      { path: 'exams/:examId', element: <ExamDetailPage /> },
-      { path: 'exams/:examId/learn', element: <LearnPage /> },
+      {
+        path: '/',
+        element: (
+          <OnboardingGate>
+            <RootLayout />
+          </OnboardingGate>
+        ),
+        children: [
+          { index: true, element: <DashboardPage /> },
+          { path: 'classes', element: <ClassesPage /> },
+          { path: 'exams', element: <ExamsPage /> },
+          { path: 'exams/:examId', element: <ExamDetailPage /> },
+          { path: 'exams/:examId/learn', element: <LearnPage /> },
+          { path: 'profile', element: <ProfilePage /> },
+        ],
+      },
     ],
   },
 ])
@@ -29,7 +46,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,
 )
