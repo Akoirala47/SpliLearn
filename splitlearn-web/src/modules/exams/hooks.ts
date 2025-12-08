@@ -22,18 +22,30 @@ export function useExams(classId?: string) {
 export function useCreateExam(classId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (title: string) => title,
-    onMutate: async (title) => {
+    mutationFn: async (input: { title: string; date: string }) => input,
+    onMutate: async (input) => {
       await qc.cancelQueries({ queryKey: ['exams', classId] })
       const prev = qc.getQueryData<ExamRow[]>(['exams', classId]) || []
-      const optimistic: ExamRow = { id: 'optimistic-' + Date.now(), class_id: classId, title, date: null, created_at: new Date().toISOString() }
+      const optimistic: ExamRow = { 
+        id: 'optimistic-' + Date.now(), 
+        class_id: classId, 
+        title: input.title, 
+        date: input.date, // Required now
+        created_at: new Date().toISOString() 
+      }
       qc.setQueryData(['exams', classId], [optimistic, ...prev])
       return { prev }
     },
     onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(['exams', classId], ctx.prev) },
-    onSettled: async (title) => {
-      const { error } = await supabase.from('exams').insert({ class_id: classId, title })
-      if (error) console.error(error)
+    onSettled: async (input) => {
+      if (input && input.date) {
+        const { error } = await supabase.from('exams').insert({ 
+          class_id: classId, 
+          title: input.title,
+          date: input.date // Required
+        })
+        if (error) console.error(error)
+      }
       qc.invalidateQueries({ queryKey: ['exams', classId] })
     },
   })

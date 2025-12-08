@@ -1,10 +1,8 @@
 import { Outlet, Link, NavLink } from 'react-router-dom'
-import { Menu, BookOpen, GraduationCap, PlayCircle, Search, FileText } from 'lucide-react'
+import { Menu, BookOpen, GraduationCap, PlayCircle, FileText } from 'lucide-react'
 import { UserMenu } from './UserMenu'
-import { useProfile } from '../profile/useProfile'
 
 export function RootLayout() {
-  const { firstName } = useProfile()
   return (
     <div className="min-h-full flex">
       <div className="liquid-bg" aria-hidden>
@@ -13,7 +11,7 @@ export function RootLayout() {
       </div>
       <aside className="hidden md:flex sidebar glass">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full brand-gradient" />
+          <img src="/vite.svg" alt="SplitLearn" className="h-8 w-8" />
           <Link to="/" className="font-semibold">SplitLearn</Link>
         </div>
         <nav className="flex flex-col gap-1">
@@ -35,10 +33,6 @@ export function RootLayout() {
         <header className="flex items-center gap-3">
           <button className="md:hidden p-2 glass"><Menu /></button>
           <div className="flex-1" />
-          <div className="glass search-glow flex items-center gap-2 px-3 py-2 rounded-full">
-            <Search className="h-4 w-4 opacity-60" />
-            <input placeholder={`Search your study space, ${firstName}`} className="bg-transparent outline-none placeholder:opacity-70 text-white" />
-          </div>
           <UserMenu />
         </header>
         <main>

@@ -1,9 +1,8 @@
-import { usePreferences } from '../state/preferences'
-import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient'
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Play, FileText, Check, Loader2, Clock } from 'lucide-react'
+import { ArrowLeft, Play, FileText, Check, Loader2, Clock, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 
 type Video = {
@@ -13,6 +12,7 @@ type Video = {
   description?: string
   thumbnail_url: string
   duration?: number // in seconds
+  subpoint_index?: number | null
 }
 
 type Topic = {
@@ -36,7 +36,8 @@ function formatDuration(seconds?: number): string {
 export function LearnPage() {
   const { examId } = useParams()
   const { user } = useAuth()
-  const { typingPausesVideo, setTypingPausesVideo } = usePreferences()
+  const qc = useQueryClient()
+  const [searchParams] = useSearchParams()
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null)
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(0)
 
@@ -56,13 +57,160 @@ export function LearnPage() {
         .order('created_at', { ascending: true })
 
       if (topicsError) throw topicsError
-      return topicsData as unknown as Topic[]
+      // Sort videos by subpoint_index
+      const topicsWithSortedVideos = (topicsData || []).map(topic => ({
+        ...topic,
+        videos: (topic.videos || []).sort((a: any, b: any) => {
+          const aIdx = a.subpoint_index ?? 999
+          const bIdx = b.subpoint_index ?? 999
+          return aIdx - bIdx
+        })
+      }))
+      return topicsWithSortedVideos as unknown as Topic[]
     }
   })
 
+  // Fetch video completions for this exam
+  const allVideoIds = topics?.flatMap(t => t.videos?.map(v => v.id) || []) || []
+  const { data: completions } = useQuery<Record<string, boolean>>({
+    queryKey: ['video-completions', examId, user?.id, allVideoIds.sort().join(',')],
+    enabled: !!user && !!examId && allVideoIds.length > 0,
+    queryFn: async () => {
+      if (!user || allVideoIds.length === 0) return {}
+      const { data, error } = await supabase
+        .from('video_completions')
+        .select('video_id')
+        .eq('user_id', user.id)
+        .eq('exam_id', examId)
+        .in('video_id', allVideoIds)
+      
+      if (error) throw error
+      const completionMap: Record<string, boolean> = {}
+      for (const comp of (data || [])) {
+        completionMap[comp.video_id] = true
+      }
+      return completionMap
+    },
+  })
+
+  // Mark video as complete mutation
+  const markVideoComplete = useMutation({
+    mutationFn: async ({ videoId, completed }: { videoId: string; completed: boolean }) => {
+      if (!user || !examId) throw new Error('User or exam ID missing')
+      
+      if (completed) {
+        const { error } = await supabase
+          .from('video_completions')
+          .upsert({
+            user_id: user.id,
+            video_id: videoId,
+            exam_id: examId,
+            is_manually_completed: true,
+          }, {
+            onConflict: 'user_id,video_id'
+          })
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('video_completions')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('video_id', videoId)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['video-completions'] })
+      qc.invalidateQueries({ queryKey: ['exam-progress'] })
+    },
+  })
+
+
+  // Initialize from URL params after topics are loaded
+  useEffect(() => {
+    if (!topics) return
+    const topicId = searchParams.get('topicId')
+    const videoId = searchParams.get('videoId')
+    if (topicId) {
+      setActiveTopicId(topicId)
+      // Find video index if videoId is provided
+      if (videoId) {
+        const topic = topics.find(t => t.id === topicId)
+        if (topic) {
+          const vidIdx = topic.videos.findIndex(v => v.id === videoId)
+          if (vidIdx >= 0) {
+            setSelectedVideoIndex(vidIdx)
+          }
+        }
+      }
+    }
+  }, [searchParams, topics])
+
   const activeTopic = topics?.find(t => t.id === activeTopicId)
   const activeVideos = activeTopic?.videos || []
-  const activeVideo = activeVideos[selectedVideoIndex] || activeVideos[0]
+
+  // Combine active videos with alternative videos for selection
+  // Start with just the active videos from database
+  const baseVideos = activeVideos
+  const currentSelectedVideo = baseVideos[selectedVideoIndex] || baseVideos[0]
+
+  // Fetch alternative videos when the selected video changes
+  const { data: alternativeVideos, isLoading: loadingAlternatives } = useQuery<Video[]>({
+    queryKey: ['alternative-videos', currentSelectedVideo?.youtube_id, activeTopic?.title],
+    enabled: !!currentSelectedVideo && !!activeTopic,
+    queryFn: async () => {
+      if (!currentSelectedVideo || !activeTopic) return []
+      
+      const excludeIds = baseVideos.map(v => v.youtube_id)
+      const { data, error } = await supabase.functions.invoke('get-alternative-videos', {
+        body: {
+          videoTitle: currentSelectedVideo.title,
+          topicTitle: activeTopic.title,
+          excludeVideoIds: excludeIds,
+        },
+      })
+      
+      if (error) {
+        console.error('Failed to fetch alternative videos:', error)
+        return []
+      }
+      
+      return (data as any)?.videos || []
+    },
+  })
+
+  // Combine base videos with alternative videos
+  const availableVideos = (() => {
+    const allVideos = [...baseVideos]
+    const existingIds = new Set(baseVideos.map(v => v.youtube_id))
+    
+    // Add alternative videos that aren't already in the list
+    if (alternativeVideos) {
+      for (const altVideo of alternativeVideos) {
+        if (!existingIds.has(altVideo.youtube_id)) {
+          allVideos.push({
+            id: `alt-${altVideo.youtube_id}`,
+            youtube_id: altVideo.youtube_id,
+            title: altVideo.title,
+            description: altVideo.description,
+            thumbnail_url: altVideo.thumbnail_url,
+            duration: altVideo.duration,
+          })
+        }
+      }
+    }
+    
+    return allVideos
+  })()
+
+  // Ensure selectedVideoIndex is valid
+  useEffect(() => {
+    if (selectedVideoIndex >= availableVideos.length && availableVideos.length > 0) {
+      setSelectedVideoIndex(0)
+    }
+  }, [availableVideos.length, selectedVideoIndex])
+
+  const activeVideo = availableVideos[selectedVideoIndex] || currentSelectedVideo
 
   // Reset video selection when topic changes
   useEffect(() => {
@@ -163,20 +311,26 @@ export function LearnPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Video Selector - only show if multiple videos */}
-              {activeVideos.length > 1 && (
+              {/* Video Selector - show if we have multiple videos (including alternatives) */}
+              {availableVideos.length > 1 && (
                 <div className="flex items-center gap-2">
                   <select
                     value={selectedVideoIndex}
-                    onChange={(e) => setSelectedVideoIndex(parseInt(e.target.value, 10))}
+                    onChange={(e) => {
+                      const newIndex = parseInt(e.target.value, 10)
+                      setSelectedVideoIndex(newIndex)
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/20"
                   >
-                    {activeVideos.map((video, idx) => (
-                      <option key={video.id} value={idx} className="bg-[#1A1A2E]">
-                        Video {idx + 1}: {video.title.length > 40 ? video.title.slice(0, 40) + '...' : video.title}
+                    {availableVideos.map((video, idx) => (
+                      <option key={video.id || video.youtube_id} value={idx} className="bg-[#1A1A2E]">
+                        {idx < activeVideos.length ? 'Video' : 'Alternative'} {idx + 1}: {video.title.length > 40 ? video.title.slice(0, 40) + '...' : video.title}
                       </option>
                     ))}
                   </select>
+                  {loadingAlternatives && (
+                    <Loader2 size={14} className="animate-spin opacity-60" />
+                  )}
                 </div>
               )}
               <div className="text-xs text-muted flex items-center gap-1.5">
@@ -192,22 +346,45 @@ export function LearnPage() {
                   </>
                 )}
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer hidden sm:flex">
-                <input
-                  type="checkbox"
-                  checked={typingPausesVideo}
-                  onChange={(e) => setTypingPausesVideo(e.target.checked)}
-                  className="rounded bg-white/10 border-white/20"
-                />
-                Typing pauses video
-              </label>
+              {/* Completion Button */}
+              {activeVideo.id && user && (
+                <button
+                  onClick={() => {
+                    if (activeVideo.id) {
+                      const isCompleted = completions?.[activeVideo.id]
+                      markVideoComplete.mutate({
+                        videoId: activeVideo.id,
+                        completed: !isCompleted
+                      })
+                    }
+                  }}
+                  disabled={markVideoComplete.isPending || !activeVideo.id}
+                  className={`px-3 py-2 rounded-lg backdrop-blur-sm flex items-center gap-2 text-sm font-medium transition-all ${
+                    completions?.[activeVideo.id!] 
+                      ? 'bg-green-500/80 text-white hover:bg-green-500' 
+                      : 'bg-white/10 text-white hover:bg-white/20'
+                  } disabled:opacity-50`}
+                >
+                  {completions?.[activeVideo.id!] ? (
+                    <>
+                      <CheckCircle2 size={16} fill="currentColor" />
+                      Completed
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={16} />
+                      Mark Complete
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
           <div id="split-container" className="flex-1 flex flex-col min-h-0 relative select-none">
             {/* Top Pane: Video + Description */}
             <div style={{ height: `${videoHeightPct}%` }} className="flex flex-col min-h-0 gap-4 overflow-y-auto pb-2">
-              <div className="glass rounded-2xl overflow-hidden bg-black shrink-0 aspect-video w-full max-w-4xl mx-auto">
+              <div className="glass rounded-2xl overflow-hidden bg-black shrink-0 aspect-video w-full max-w-4xl mx-auto relative">
                 <iframe
                   src={`https://www.youtube.com/embed/${activeVideo.youtube_id}?enablejsapi=1`}
                   title={activeVideo.title}
@@ -221,6 +398,66 @@ export function LearnPage() {
                 <div className="glass rounded-2xl p-4 max-w-4xl mx-auto w-full shrink-0">
                   <h3 className="font-medium text-white mb-1">About this video</h3>
                   <p className="text-sm text-muted leading-relaxed">{activeVideo.description}</p>
+                </div>
+              )}
+              
+              {/* Alternative Videos - Show 3 alternatives that aren't currently selected */}
+              {alternativeVideos && alternativeVideos.length > 0 && (
+                <div className="glass rounded-2xl p-4 max-w-4xl mx-auto w-full shrink-0">
+                  <h3 className="font-medium text-white mb-3">Alternative Videos</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {alternativeVideos.slice(0, 3).map((altVideo) => {
+                      const isCurrentVideo = altVideo.youtube_id === activeVideo.youtube_id
+                      const videoIndex = availableVideos.findIndex(v => v.youtube_id === altVideo.youtube_id)
+                      
+                      return (
+                        <button
+                          key={altVideo.youtube_id}
+                          onClick={() => {
+                            if (videoIndex >= 0) {
+                              setSelectedVideoIndex(videoIndex)
+                            } else {
+                              // Video not in availableVideos yet, but should be after useEffect runs
+                              // For now, find it in availableVideos by searching
+                              const idx = availableVideos.findIndex(v => v.youtube_id === altVideo.youtube_id)
+                              if (idx >= 0) {
+                                setSelectedVideoIndex(idx)
+                              }
+                            }
+                          }}
+                          className={`group text-left glass p-3 rounded-xl hover:bg-white/5 transition-all ${isCurrentVideo ? 'ring-2 ring-blue-500/50' : ''}`}
+                          disabled={isCurrentVideo}
+                        >
+                          <div className="relative aspect-video rounded-lg overflow-hidden bg-black/20 mb-2">
+                            <img 
+                              src={altVideo.thumbnail_url} 
+                              alt={altVideo.title}
+                              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                            />
+                            <div className="absolute inset-0 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="h-8 w-8 rounded-full bg-white/20 backdrop-blur-sm grid place-items-center">
+                                <Play fill="white" className="ml-0.5" size={14} />
+                              </div>
+                            </div>
+                            {altVideo.duration && (
+                              <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm text-xs text-white flex items-center gap-1">
+                                <Clock size={10} />
+                                {formatDuration(altVideo.duration)}
+                              </div>
+                            )}
+                            {isCurrentVideo && (
+                              <div className="absolute top-1 left-1 px-2 py-0.5 rounded bg-blue-500/80 backdrop-blur-sm text-xs text-white font-medium">
+                                Playing
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-xs font-medium text-white line-clamp-2 group-hover:text-white/90 transition-colors">
+                            {altVideo.title}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>

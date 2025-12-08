@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
-type SlideResult = { id: string; ok: boolean; ms: number; err?: string; rawSnippet?: string };
+type SlideResult = { id: string; ok: boolean; ms: number; err?: string; rawSnippet?: string; skipped?: boolean };
 
 type YouTubeVideo = {
   youtube_id: string;
@@ -48,6 +48,42 @@ function parseJsonish(text: string): { title?: string; subpoints?: string[] } | 
     console.log(`[parseJsonish] Direct parse failed, trying to extract JSON object`);
   }
   
+  // Check if JSON appears to be truncated (ends mid-string or mid-array)
+  const isTruncated = /"[\s\n]*$|\[[\s\n]*$|,[\s\n]*$/.test(cleaned);
+  if (isTruncated) {
+    console.warn(`[parseJsonish] JSON appears truncated, attempting to repair...`);
+    
+    // Try to repair truncated JSON by finding complete parts
+    try {
+      // Extract title (even if truncated)
+      const titleMatch = cleaned.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"?/);
+      const title = titleMatch && titleMatch[1] ? titleMatch[1] : "Untitled Topic";
+      
+      // Extract subpoints - find all complete string entries in the array
+      const subpointsMatch = cleaned.match(/"subpoints"\s*:\s*\[(.*)/s);
+      const subpoints: string[] = [];
+      
+      if (subpointsMatch) {
+        const subpointsContent = subpointsMatch[1];
+        // Match complete quoted strings (handling escaped quotes)
+        const stringPattern = /"((?:[^"\\]|\\.)*)"/g;
+        let match;
+        while ((match = stringPattern.exec(subpointsContent)) !== null) {
+          subpoints.push(match[1]);
+        }
+      }
+      
+      // If we found at least the title or some subpoints, return repaired object
+      if (title !== "Untitled Topic" || subpoints.length > 0) {
+        const repaired = { title, subpoints };
+        console.log(`[parseJsonish] Successfully repaired truncated JSON: title="${title}", ${subpoints.length} subpoints`);
+        return repaired;
+      }
+    } catch (repairError) {
+      console.warn(`[parseJsonish] Repair attempt failed:`, repairError);
+    }
+  }
+  
   // Try to extract first top-level JSON object
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
@@ -83,7 +119,15 @@ function parseJsonish(text: string): { title?: string; subpoints?: string[] } | 
   return null;
 }
 
-async function geminiCall(key: string, model: string, parts: any[], config?: { maxOutputTokens?: number; responseMimeType?: string }): Promise<any> {
+// Simple rate limiter: track last call time and enforce minimum delay
+let lastGeminiCallTime = 0;
+const MIN_DELAY_BETWEEN_CALLS_MS = 1000; // 1 second minimum between calls for free tier
+
+async function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function geminiCall(key: string, model: string, parts: any[], config?: { maxOutputTokens?: number; responseMimeType?: string }, retryCount = 0): Promise<any> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
   const body = {
     contents: [{ role: "user", parts }],
@@ -94,11 +138,53 @@ async function geminiCall(key: string, model: string, parts: any[], config?: { m
     },
   };
   
-  console.log(`[geminiCall] Calling Gemini API with model: ${model}, parts: ${parts.length}`);
+  // Rate limiting: ensure minimum delay between calls
+  const now = Date.now();
+  const timeSinceLastCall = now - lastGeminiCallTime;
+  if (timeSinceLastCall < MIN_DELAY_BETWEEN_CALLS_MS) {
+    const waitTime = MIN_DELAY_BETWEEN_CALLS_MS - timeSinceLastCall;
+    console.log(`[geminiCall] Rate limiting: waiting ${waitTime}ms before next call`);
+    await delay(waitTime);
+  }
+  lastGeminiCallTime = Date.now();
+  
+  console.log(`[geminiCall] Calling Gemini API with model: ${model}, parts: ${parts.length}, attempt: ${retryCount + 1}`);
   const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   
   if (!resp.ok) {
     const errTxt = await resp.text().catch(() => resp.statusText);
+    let errJson: any = null;
+    try {
+      errJson = JSON.parse(errTxt);
+    } catch {
+      // Not JSON, ignore
+    }
+    
+    // Handle 429 rate limit errors with retry
+    if (resp.status === 429) {
+      // Extract retry delay from error response
+      let retryDelay = 30000; // Default 30 seconds
+      if (errJson?.error?.details) {
+        for (const detail of errJson.error.details) {
+          if (detail["@type"] === "type.googleapis.com/google.rpc.RetryInfo" && detail.retryDelay) {
+            // retryDelay is in seconds, convert to milliseconds
+            retryDelay = parseFloat(detail.retryDelay) * 1000;
+            break;
+          }
+        }
+      }
+      
+      // Retry with exponential backoff (max 3 retries)
+      if (retryCount < 3) {
+        console.warn(`[geminiCall] Rate limited (429), retrying after ${retryDelay}ms (attempt ${retryCount + 1}/3)`);
+        await delay(retryDelay);
+        return geminiCall(key, model, parts, config, retryCount + 1);
+      } else {
+        console.error(`[geminiCall] Rate limit exceeded after ${retryCount + 1} attempts`);
+        throw new Error(`Gemini API rate limit exceeded. Please wait and try again later. Quota: ${errJson?.error?.details?.find((d: any) => d["@type"]?.includes("QuotaFailure"))?.violations?.[0]?.quotaValue || "unknown"} requests/day`);
+      }
+    }
+    
     console.error(`[geminiCall] Gemini API error: ${resp.status} ${errTxt}`);
     throw new Error(`Gemini ${model} ${resp.status} ${errTxt}`);
   }
@@ -268,6 +354,300 @@ Only return the JSON, no other text.`;
   }
 }
 
+/**
+ * Process multiple PDFs in a single Gemini API call to save quota
+ * Returns an array of topics, one for each PDF
+ */
+async function summarizeMultiplePdfsWithGemini(
+  key: string, 
+  model: string, 
+  pdfData: Array<{ bytes: Uint8Array; filePath?: string; slideId: string }>
+): Promise<Array<{ slideId: string; title: string; subpoints: string[]; raw: string }>> {
+  console.log(`[summarizeMultiplePdfsWithGemini] Processing ${pdfData.length} PDFs in single API call`);
+  
+  // Build parts array with instruction and all PDFs
+  const parts: any[] = [{
+    text: `You are analyzing ${pdfData.length} study slides. For each slide, extract a concise topic title and 3-7 bullet subpoints. Return a JSON array where each element has the structure: {"slideIndex": number (0-based), "title": string, "subpoints": string[]}. Return ONLY the JSON array, no markdown, no code blocks. Example format: [{"slideIndex": 0, "title": "...", "subpoints": [...]}, {"slideIndex": 1, ...}]`
+  }];
+  
+  // Add all PDFs to the parts array
+  for (let i = 0; i < pdfData.length; i++) {
+    const item = pdfData[i];
+    const isPdf = !item.filePath || item.filePath.toLowerCase().endsWith('.pdf');
+    const mimeType = isPdf ? "application/pdf" : "image/png";
+    const b64 = encodeBase64(item.bytes);
+    
+    parts.push({
+      text: `--- Slide ${i + 1} (Index: ${i}) ---`
+    });
+    parts.push({
+      inlineData: { mimeType, data: b64 }
+    });
+  }
+  
+  try {
+    // Increase max tokens for batch processing to handle larger responses
+    const data = await geminiCall(key, model, parts, { maxOutputTokens: 8192 });
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    
+    console.log(`[summarizeMultiplePdfsWithGemini] Raw response length: ${raw.length}`);
+    
+    // Parse the JSON array response with multiple fallback strategies
+    let parsed: any = null;
+    
+    // Strategy 1: Direct parse after cleaning
+    try {
+      let cleaned = raw.trim();
+      // Remove markdown code blocks
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      // Remove any leading/trailing whitespace or text
+      cleaned = cleaned.replace(/^[^{[]*/, '').replace(/[^}\]]*$/, '');
+      
+      parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        console.log(`[summarizeMultiplePdfsWithGemini] Successfully parsed JSON array directly`);
+      }
+    } catch (e1) {
+      console.log(`[summarizeMultiplePdfsWithGemini] Direct parse failed, trying extraction: ${e1 instanceof Error ? e1.message : String(e1)}`);
+      
+      // Strategy 2: Extract JSON array by finding matching brackets (handles strings correctly)
+      try {
+        let cleaned = raw.trim();
+        cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        
+        // Find the first [ and try to find matching ]
+        const arrayStart = cleaned.indexOf("[");
+        if (arrayStart < 0) {
+          throw new Error("No array start bracket found");
+        }
+        
+        // Find matching closing bracket by counting nested brackets and handling strings
+        let bracketCount = 0;
+        let inString = false;
+        let escapeNext = false;
+        let arrayEnd = -1;
+        
+        for (let i = arrayStart; i < cleaned.length; i++) {
+          const char = cleaned[i];
+          
+          if (escapeNext) {
+            escapeNext = false;
+            continue;
+          }
+          
+          if (char === '\\') {
+            escapeNext = true;
+            continue;
+          }
+          
+          if (char === '"') {
+            inString = !inString;
+            continue;
+          }
+          
+          if (!inString) {
+            if (char === '[') bracketCount++;
+            if (char === ']') {
+              bracketCount--;
+              if (bracketCount === 0) {
+                arrayEnd = i;
+                break;
+              }
+            }
+          }
+        }
+        
+        if (arrayEnd > arrayStart) {
+          const arrayStr = cleaned.slice(arrayStart, arrayEnd + 1);
+          parsed = JSON.parse(arrayStr);
+          if (Array.isArray(parsed)) {
+            console.log(`[summarizeMultiplePdfsWithGemini] Successfully parsed extracted JSON array`);
+          }
+        } else {
+          throw new Error("Could not find matching closing bracket");
+        }
+      } catch (e2) {
+        console.log(`[summarizeMultiplePdfsWithGemini] Array extraction failed, trying repair: ${e2 instanceof Error ? e2.message : String(e2)}`);
+        
+        // Strategy 3: Try to repair common JSON issues
+        try {
+          let cleaned = raw.trim();
+          cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+          
+          // Find array start
+          const arrayStart = cleaned.indexOf("[");
+          if (arrayStart < 0) {
+            throw new Error("No array start found");
+          }
+          
+          // Try to find matching closing bracket, counting nested brackets
+          let bracketCount = 0;
+          let inString = false;
+          let escapeNext = false;
+          let arrayEnd = -1;
+          
+          for (let i = arrayStart; i < cleaned.length; i++) {
+            const char = cleaned[i];
+            
+            if (escapeNext) {
+              escapeNext = false;
+              continue;
+            }
+            
+            if (char === '\\') {
+              escapeNext = true;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            
+            if (!inString) {
+              if (char === '[') bracketCount++;
+              if (char === ']') {
+                bracketCount--;
+                if (bracketCount === 0) {
+                  arrayEnd = i;
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (arrayEnd > arrayStart) {
+            const arrayStr = cleaned.slice(arrayStart, arrayEnd + 1);
+            parsed = JSON.parse(arrayStr);
+            if (Array.isArray(parsed)) {
+              console.log(`[summarizeMultiplePdfsWithGemini] Successfully parsed repaired JSON array`);
+            }
+          } else {
+            throw new Error("Could not find matching closing bracket");
+          }
+        } catch (e3) {
+          // Strategy 4: Try to parse individual objects and build array
+          console.log(`[summarizeMultiplePdfsWithGemini] Repair failed, trying individual object parsing: ${e3 instanceof Error ? e3.message : String(e3)}`);
+          
+          try {
+            let cleaned = raw.trim();
+            cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+            
+            // Try to extract individual JSON objects
+            const objects: any[] = [];
+            let start = 0;
+            
+            while (start < cleaned.length) {
+              const objStart = cleaned.indexOf("{", start);
+              if (objStart < 0) break;
+              
+              // Find matching closing brace
+              let braceCount = 0;
+              let inString = false;
+              let escapeNext = false;
+              let objEnd = -1;
+              
+              for (let i = objStart; i < cleaned.length; i++) {
+                const char = cleaned[i];
+                
+                if (escapeNext) {
+                  escapeNext = false;
+                  continue;
+                }
+                
+                if (char === '\\') {
+                  escapeNext = true;
+                  continue;
+                }
+                
+                if (char === '"') {
+                  inString = !inString;
+                  continue;
+                }
+                
+                if (!inString) {
+                  if (char === '{') braceCount++;
+                  if (char === '}') {
+                    braceCount--;
+                    if (braceCount === 0) {
+                      objEnd = i;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              if (objEnd > objStart) {
+                try {
+                  const objStr = cleaned.slice(objStart, objEnd + 1);
+                  const obj = JSON.parse(objStr);
+                  objects.push(obj);
+                  start = objEnd + 1;
+                } catch {
+                  start = objStart + 1;
+                }
+              } else {
+                break;
+              }
+            }
+            
+            if (objects.length > 0) {
+              parsed = objects;
+              console.log(`[summarizeMultiplePdfsWithGemini] Successfully parsed ${objects.length} individual objects`);
+            } else {
+              throw new Error("No valid JSON objects found");
+            }
+          } catch (e4) {
+            console.error(`[summarizeMultiplePdfsWithGemini] All parsing strategies failed`);
+            console.error(`[summarizeMultiplePdfsWithGemini] Response preview: ${raw.substring(0, 500)}`);
+            throw new Error(`Failed to parse batch response after all attempts: ${e4 instanceof Error ? e4.message : String(e4)}`);
+          }
+        }
+      }
+    }
+    
+    let results: Array<{ slideId: string; title: string; subpoints: string[]; raw: string }> = [];
+    
+    if (Array.isArray(parsed)) {
+      // Map results back to slide IDs
+      for (const item of parsed) {
+        if (typeof item.slideIndex === 'number' && item.slideIndex >= 0 && item.slideIndex < pdfData.length) {
+          const slideId = pdfData[item.slideIndex].slideId;
+          const title = String(item.title || `Topic ${item.slideIndex + 1}`);
+          const subpoints = Array.isArray(item.subpoints) 
+            ? item.subpoints.map((s: unknown) => String(s)).filter(Boolean)
+            : [];
+          
+          if (title && subpoints.length > 0) {
+            results.push({ slideId, title, subpoints, raw: JSON.stringify(item) });
+          }
+        }
+      }
+    }
+    
+    // Ensure we have results for all slides (fill in missing ones)
+    for (let i = 0; i < pdfData.length; i++) {
+      const existing = results.find(r => r.slideId === pdfData[i].slideId);
+      if (!existing) {
+        console.warn(`[summarizeMultiplePdfsWithGemini] No result for slide ${i}, creating fallback`);
+        results.push({
+          slideId: pdfData[i].slideId,
+          title: pdfData[i].filePath?.split('/').pop()?.replace(/\.(pdf|ppt|pptx)$/i, '') || `Topic ${i + 1}`,
+          subpoints: ["Content extracted", "Review this slide"],
+          raw: ""
+        });
+      }
+    }
+    
+    console.log(`[summarizeMultiplePdfsWithGemini] Successfully extracted ${results.length} topics`);
+    return results;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[summarizeMultiplePdfsWithGemini] Batch processing failed:`, errorMsg);
+    throw error;
+  }
+}
+
 async function summarizePdfWithGemini(key: string, model: string, pdfBytes: Uint8Array, filePath?: string): Promise<{ title: string; subpoints: string[]; raw: string }> {
   console.log(`[summarizePdfWithGemini] Starting, file size: ${pdfBytes.length} bytes, filePath: ${filePath || 'unknown'}`);
   
@@ -284,13 +664,13 @@ async function summarizePdfWithGemini(key: string, model: string, pdfBytes: Uint
     inlineData: { mimeType, data: b64 } 
   }];
 
-  // First attempt
+  // First attempt - use higher token limit to avoid truncation
   let data;
   let raw = "";
   let parsed: { title?: string; subpoints?: string[] } | null = null;
   
   try {
-    data = await geminiCall(key, model, baseParts);
+    data = await geminiCall(key, model, baseParts, { maxOutputTokens: 2048, responseMimeType: "application/json" });
     console.log(`[summarizePdfWithGemini] First Gemini call completed`);
     
     // Try multiple ways to extract the response
@@ -328,7 +708,7 @@ async function summarizePdfWithGemini(key: string, model: string, pdfBytes: Uint
       }, { 
         inlineData: { mimeType, data: b64 } 
       }];
-      data = await geminiCall(key, model, fallbackParts);
+      data = await geminiCall(key, model, fallbackParts, { maxOutputTokens: 2048, responseMimeType: "application/json" });
       raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? raw;
       parsed = parseJsonish(raw) ?? parsed;
       title = String(parsed?.title ?? (title || "Untitled Topic"));
@@ -357,10 +737,10 @@ async function bytesFromSignedUrl(signedUrl: string): Promise<Uint8Array> {
   return new Uint8Array(await r.arrayBuffer());
 }
 
-async function processSlide({ supabase, slide, apiKey, youtubeApiKey, model }: { supabase: any; slide: any; apiKey: string; youtubeApiKey: string; model: string }): Promise<SlideResult> {
+async function processSlide({ supabase, slide, apiKey, youtubeApiKey, model, examId }: { supabase: any; slide: any; apiKey: string; youtubeApiKey: string; model: string; examId: string }): Promise<SlideResult> {
   const t0 = Date.now();
   try {
-    console.log(`[processSlide] Starting processing for slide ${slide.id}`);
+    console.log(`[processSlide] Starting processing for slide ${slide.id}, file: ${slide.file_url}`);
     
     // Check if topic already exists for this slide (to avoid duplicates)
     const { data: existingTopic } = await supabase
@@ -372,7 +752,7 @@ async function processSlide({ supabase, slide, apiKey, youtubeApiKey, model }: {
     if (existingTopic) {
       console.log(`[processSlide] Topic already exists for slide ${slide.id}, skipping`);
       await supabase.from("slides").update({ ai_summary_json: { status: "done" } }).eq("id", slide.id);
-      return { id: slide.id, ok: true, ms: Date.now() - t0 };
+      return { id: slide.id, ok: true, ms: Date.now() - t0, skipped: true };
     }
 
     // Get signed URL for the slide file
@@ -406,95 +786,149 @@ async function processSlide({ supabase, slide, apiKey, youtubeApiKey, model }: {
     if (insertErr) throw insertErr;
     console.log(`[processSlide] Topic created: ${topic.id}`);
 
-    // Generate search query for YouTube videos
-    // Use topic title + first subpoint for better relevance
-    // Truncate to reasonable length (YouTube API has limits)
-    const rawQuery = `${title} ${subpoints[0] || ''} tutorial explanation`.trim();
-    const searchQuery = rawQuery.length > 100 ? rawQuery.substring(0, 100) : rawQuery;
-    console.log(`[processSlide] Searching YouTube for: "${searchQuery}"`);
-
-    // Search YouTube for relevant videos
-    let videos: YouTubeVideo[] = [];
-    if (youtubeApiKey) {
-      try {
-        videos = await searchYouTube(youtubeApiKey, searchQuery);
-        console.log(`[processSlide] Found ${videos.length} YouTube videos`);
-      } catch (youtubeError) {
-        const errorMsg = youtubeError instanceof Error ? youtubeError.message : String(youtubeError);
-        console.error(`[processSlide] YouTube search failed for "${searchQuery}":`, errorMsg);
-        // Continue without videos if search fails
-      }
-    } else {
-      console.warn(`[processSlide] YOUTUBE_API_KEY not provided, skipping video search`);
-    }
-
-    // Rerank videos using Gemini to get top 3 most relevant
-    let topVideos: YouTubeVideo[] = [];
-    if (videos.length > 0) {
-      try {
-        console.log(`[processSlide] Reranking ${videos.length} videos with Gemini`);
-        topVideos = await rerankVideosWithGemini(apiKey, model, title, subpoints, videos);
-        console.log(`[processSlide] Selected top ${topVideos.length} videos after reranking`);
-      } catch (rerankError) {
-        const errorMsg = rerankError instanceof Error ? rerankError.message : String(rerankError);
-        console.warn(`[processSlide] Video reranking failed:`, errorMsg);
-        // Fallback to first 3 videos if reranking fails
-        topVideos = videos.slice(0, 3);
-        console.log(`[processSlide] Using first ${topVideos.length} videos as fallback`);
-      }
-    } else {
-      console.log(`[processSlide] No videos to rerank`);
-    }
-
-    // Insert top videos (up to 3) into database
-    if (topVideos.length > 0) {
-      console.log(`[processSlide] Preparing to insert ${topVideos.length} videos into database`);
-      const videoInserts = topVideos.map((video, idx) => {
-        const insert: any = {
-          topic_id: topic.id,
-          youtube_id: video.youtube_id,
-          title: video.title,
-          description: truncate(video.description || '', 500),
-          thumbnail_url: video.thumbnail_url,
-        };
-        // Only include duration if the column exists (will try without it if this fails)
-        if (video.duration) {
-          insert.duration = video.duration;
-        }
-        console.log(`[processSlide] Video ${idx + 1}: ${video.title} (${video.youtube_id})`);
-        return insert;
-      });
-
-      console.log(`[processSlide] Inserting videos into database...`);
-      let { data: insertedVideos, error: videoInsertErr } = await supabase
-        .from("videos")
-        .insert(videoInserts)
-        .select();
+    // Generate one video per subpoint to ensure all bullet points are covered
+    // Track used videos to avoid duplicates - if same video is found, reuse it for multiple subpoints
+    if (youtubeApiKey && subpoints.length > 0) {
+      console.log(`[processSlide] Generating videos for ${subpoints.length} subpoints`);
+      const videoInserts: any[] = [];
+      const usedVideoIds = new Set<string>(); // Track which youtube_ids we've already used
+      const videoToSubpointIndices = new Map<string, number[]>(); // Map video_id to array of subpoint indices
+      
+      for (let subpointIdx = 0; subpointIdx < subpoints.length; subpointIdx++) {
+        const subpoint = subpoints[subpointIdx];
         
-      // If insert fails due to missing duration column, retry without duration
-      if (videoInsertErr && videoInsertErr.message?.includes("duration")) {
-        console.warn(`[processSlide] Insert failed due to duration column, retrying without duration field`);
-        const videoInsertsNoDuration = videoInserts.map(({ duration, ...rest }) => rest);
-        const retryResult = await supabase
+        // Create search query using topic title + specific subpoint
+        const rawQuery = `${title} ${subpoint} tutorial explanation`.trim();
+        const searchQuery = rawQuery.length > 100 ? rawQuery.substring(0, 100) : rawQuery;
+        console.log(`[processSlide] Searching YouTube for subpoint ${subpointIdx + 1}: "${searchQuery}"`);
+        
+        try {
+          // Search for videos relevant to this specific subpoint
+          const videos = await searchYouTube(youtubeApiKey, searchQuery);
+          
+          if (videos.length > 0) {
+            // Use reranking if available, otherwise take first video
+            let selectedVideo: YouTubeVideo;
+            const skipReranking = Deno.env.get("SKIP_VIDEO_RERANKING") === "true";
+            
+            if (skipReranking || videos.length === 1) {
+              selectedVideo = videos[0];
+            } else {
+              try {
+                // Rerank to find best video for this subpoint
+                const reranked = await rerankVideosWithGemini(apiKey, model, title, [subpoint], videos);
+                selectedVideo = reranked[0] || videos[0];
+              } catch (rerankError) {
+                // Fallback to first video if reranking fails
+                selectedVideo = videos[0];
+                console.warn(`[processSlide] Reranking failed for subpoint ${subpointIdx + 1}, using first video`);
+              }
+            }
+            
+            // Skip videos we've already used, try to find a different one
+            let finalVideo = selectedVideo;
+            let isDuplicate = false;
+            
+            if (usedVideoIds.has(selectedVideo.youtube_id)) {
+              // Try to find a different video from search results (skip first few that are likely duplicates)
+              const alternativeVideo = videos.find((v, idx) => idx > 0 && !usedVideoIds.has(v.youtube_id));
+              if (alternativeVideo) {
+                finalVideo = alternativeVideo;
+                console.log(`[processSlide] Subpoint ${subpointIdx + 1}: Duplicate video detected, using alternative: ${finalVideo.title}`);
+              } else {
+                // All videos in search are duplicates, reuse the existing one
+                isDuplicate = true;
+                console.log(`[processSlide] Subpoint ${subpointIdx + 1}: All videos are duplicates, reusing: ${finalVideo.title} (will create separate entry for UI)`);
+              }
+            }
+            
+            // Mark this video as used (even if duplicate, we track it)
+            usedVideoIds.add(finalVideo.youtube_id);
+            
+            // Track which subpoints this video covers
+            const subpointIndices = videoToSubpointIndices.get(finalVideo.youtube_id) || [];
+            subpointIndices.push(subpointIdx);
+            videoToSubpointIndices.set(finalVideo.youtube_id, subpointIndices);
+            
+            // Create video entry for this subpoint
+            // Even if duplicate, create separate entry so each subpoint has a video association
+            // Frontend will group by youtube_id to show shared videos
+            const insert: any = {
+              topic_id: topic.id,
+              youtube_id: finalVideo.youtube_id,
+              title: finalVideo.title,
+              description: truncate(finalVideo.description || '', 500),
+              thumbnail_url: finalVideo.thumbnail_url,
+              subpoint_index: subpointIdx, // Each subpoint gets its own entry with correct index
+            };
+            
+            if (finalVideo.duration) {
+              insert.duration = finalVideo.duration;
+            }
+            
+            videoInserts.push(insert);
+            if (isDuplicate) {
+              console.log(`[processSlide] Video for subpoint ${subpointIdx + 1}: ${finalVideo.title} (duplicate - will be grouped in UI with other subpoints)`);
+            } else {
+              console.log(`[processSlide] Video for subpoint ${subpointIdx + 1}: ${finalVideo.title}`);
+            }
+          } else {
+            console.warn(`[processSlide] No videos found for subpoint ${subpointIdx + 1}`);
+          }
+        } catch (subpointError) {
+          const errorMsg = subpointError instanceof Error ? subpointError.message : String(subpointError);
+          console.error(`[processSlide] Failed to get video for subpoint ${subpointIdx + 1}:`, errorMsg);
+          // Continue with other subpoints even if one fails
+        }
+        
+        // Add small delay between searches to respect rate limits
+        if (subpointIdx < subpoints.length - 1) {
+          await delay(500);
+        }
+      }
+      
+      console.log(`[processSlide] Generated ${videoInserts.length} unique videos for ${subpoints.length} subpoints`);
+      
+      // Insert all videos at once
+      if (videoInserts.length > 0) {
+        console.log(`[processSlide] Inserting ${videoInserts.length} videos (one per subpoint) into database...`);
+        let { data: insertedVideos, error: videoInsertErr } = await supabase
           .from("videos")
-          .insert(videoInsertsNoDuration)
+          .insert(videoInserts)
           .select();
-        insertedVideos = retryResult.data;
-        videoInsertErr = retryResult.error;
-      }
-        
-      if (videoInsertErr) {
-        console.error(`[processSlide] Failed to insert videos:`, videoInsertErr);
-        console.error(`[processSlide] Error details:`, JSON.stringify(videoInsertErr, null, 2));
-        // Don't fail the whole operation if video insert fails
-      } else {
-        console.log(`[processSlide] Successfully inserted ${insertedVideos?.length ?? videoInserts.length} videos`);
-        if (insertedVideos && insertedVideos.length > 0) {
-          console.log(`[processSlide] Inserted video IDs:`, insertedVideos.map((v: any) => v.id));
+          
+        // If insert fails due to missing duration or subpoint_index column, retry without them
+        if (videoInsertErr && (videoInsertErr.message?.includes("duration") || videoInsertErr.message?.includes("subpoint_index"))) {
+          console.warn(`[processSlide] Insert failed, retrying without optional fields`);
+          const videoInsertsRetry = videoInserts.map(({ duration, subpoint_index, ...rest }) => {
+            const retryInsert: any = rest;
+            if (duration) retryInsert.duration = duration;
+            if (subpoint_index !== undefined) retryInsert.subpoint_index = subpoint_index;
+            return retryInsert;
+          });
+          const retryResult = await supabase
+            .from("videos")
+            .insert(videoInsertsRetry)
+            .select();
+          insertedVideos = retryResult.data;
+          videoInsertErr = retryResult.error;
         }
+          
+        if (videoInsertErr) {
+          console.error(`[processSlide] Failed to insert videos:`, videoInsertErr);
+          console.error(`[processSlide] Error details:`, JSON.stringify(videoInsertErr, null, 2));
+          // Don't fail the whole operation if video insert fails
+        } else {
+          console.log(`[processSlide] Successfully inserted ${insertedVideos?.length ?? videoInserts.length} videos for ${subpoints.length} subpoints`);
+          if (insertedVideos && insertedVideos.length > 0) {
+            console.log(`[processSlide] Inserted video IDs:`, insertedVideos.map((v: any) => v.id));
+          }
+        }
+      } else {
+        console.warn(`[processSlide] No videos were found for any subpoints`);
       }
-    } else {
-      console.log(`[processSlide] No videos to insert (topVideos.length = ${topVideos.length})`);
+    } else if (!youtubeApiKey) {
+      console.warn(`[processSlide] YOUTUBE_API_KEY not provided, skipping video search`);
     }
 
     // Update slide status to done
@@ -585,22 +1019,192 @@ Deno.serve(async (req: Request) => {
       return json({ topicsInserted: 0, diagnostics: { hasKey: true, model, slideCount: 0, results: [] } });
     }
 
+    console.log(`[process-exam] Processing ${slides.length} slides for exam ${examId}`);
     await supabase.from("slides").update({ ai_summary_json: { status: "processing" } }).in("id", slides.map((s: any) => s.id));
 
-    const concurrency = Number(Deno.env.get("CONCURRENCY") || 3);
-    const groups = pool(slides, Math.max(1, Math.min(6, concurrency)));
+    // Check if batch processing is enabled (default: true - processes multiple PDFs in one API call)
+    const useBatchProcessing = Deno.env.get("USE_BATCH_PROCESSING") !== "false";
+    const batchSize = Number(Deno.env.get("BATCH_SIZE") || "5"); // Process 5 slides per API call
+    const skipReranking = Deno.env.get("SKIP_VIDEO_RERANKING") === "true";
+    
     const results: SlideResult[] = [];
     
-    for (const group of groups) {
-      const batch = await Promise.all(
-        group.map((s) => processSlide({ supabase, slide: s, apiKey, youtubeApiKey, model }))
-      );
-      results.push(...batch);
+    // Reset rate limiter at start
+    lastGeminiCallTime = 0;
+    
+    if (useBatchProcessing && slides.length > 1) {
+      // Batch processing mode: process multiple slides in one API call to save quota
+      console.log(`[process-exam] Using BATCH processing mode: ${batchSize} slides per API call`);
+      
+      // Filter out slides that already have topics
+      const slidesToProcess: any[] = [];
+      for (const slide of slides) {
+        const { data: existingTopic } = await supabase
+          .from("topics")
+          .select("id")
+          .eq("slide_id", slide.id)
+          .maybeSingle();
+        
+        if (existingTopic) {
+          console.log(`[process-exam] Slide ${slide.id} already has topic, skipping`);
+          await supabase.from("slides").update({ ai_summary_json: { status: "done" } }).eq("id", slide.id);
+          results.push({ id: slide.id, ok: true, ms: 0, skipped: true });
+        } else {
+          slidesToProcess.push(slide);
+        }
+      }
+      
+      // Process slides in batches
+      for (let i = 0; i < slidesToProcess.length; i += batchSize) {
+        const batch = slidesToProcess.slice(i, i + batchSize);
+        console.log(`[process-exam] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(slidesToProcess.length / batchSize)}: ${batch.length} slides`);
+        
+        try {
+          // Download all PDFs in batch
+          const pdfData = await Promise.all(
+            batch.map(async (slide) => {
+              const { data: signed, error: signedErr } = await supabase.storage
+                .from("slides")
+                .createSignedUrl(slide.file_url, 60 * 5);
+              if (signedErr) throw signedErr;
+              
+              const bytes = await bytesFromSignedUrl(signed.signedUrl);
+              return { bytes, filePath: slide.file_url, slideId: slide.id };
+            })
+          );
+          
+          // Process all PDFs in ONE API call
+          const topics = await summarizeMultiplePdfsWithGemini(apiKey, model, pdfData);
+          
+          // Insert topics and videos for each slide
+          for (const topicData of topics) {
+            const slide = batch.find(s => s.id === topicData.slideId);
+            if (!slide) continue;
+            
+            try {
+              // Insert topic
+              const { data: topic, error: insertErr } = await supabase
+                .from("topics")
+                .insert({
+                  slide_id: slide.id,
+                  title: topicData.title,
+                  subpoints_json: topicData.subpoints,
+                })
+                .select('id')
+                .single();
+              
+              if (insertErr) throw insertErr;
+              
+              // Generate one video per subpoint
+              if (youtubeApiKey && topicData.subpoints.length > 0) {
+                console.log(`[process-exam] Generating videos for ${topicData.subpoints.length} subpoints`);
+                const videoInserts: any[] = [];
+                
+                for (let subpointIdx = 0; subpointIdx < topicData.subpoints.length; subpointIdx++) {
+                  const subpoint = topicData.subpoints[subpointIdx];
+                  const searchQuery = `${topicData.title} ${subpoint} tutorial explanation`.trim().substring(0, 100);
+                  
+                  try {
+                    const videos = await searchYouTube(youtubeApiKey, searchQuery);
+                    if (videos.length > 0) {
+                      // Take first video for this subpoint (skip reranking to save API calls in batch mode)
+                      const selectedVideo = videos[0];
+                      const insert: any = {
+                        topic_id: topic.id,
+                        youtube_id: selectedVideo.youtube_id,
+                        title: selectedVideo.title,
+                        description: truncate(selectedVideo.description || '', 500),
+                        thumbnail_url: selectedVideo.thumbnail_url,
+                        subpoint_index: subpointIdx,
+                      };
+                      if (selectedVideo.duration) {
+                        insert.duration = selectedVideo.duration;
+                      }
+                      videoInserts.push(insert);
+                    }
+                    
+                    // Small delay between searches
+                    if (subpointIdx < topicData.subpoints.length - 1) {
+                      await delay(500);
+                    }
+                  } catch (videoErr) {
+                    console.warn(`[process-exam] Video search failed for subpoint ${subpointIdx}:`, videoErr);
+                    // Continue with other subpoints
+                  }
+                }
+                
+                if (videoInserts.length > 0) {
+                  try {
+                    await supabase.from("videos").insert(videoInserts);
+                    console.log(`[process-exam] Inserted ${videoInserts.length} videos for topic`);
+                  } catch (insertErr) {
+                    console.warn(`[process-exam] Failed to insert videos:`, insertErr);
+                  }
+                }
+              }
+              
+              await supabase.from("slides").update({ ai_summary_json: { status: "done" } }).eq("id", slide.id);
+              results.push({ id: slide.id, ok: true, ms: 0 });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error(`[process-exam] Error processing slide ${topicData.slideId}:`, msg);
+              await supabase.from("slides").update({ ai_summary_json: { status: "error", error: msg } }).eq("id", slide.id);
+              results.push({ id: topicData.slideId, ok: false, ms: 0, err: msg });
+            }
+          }
+        } catch (batchError) {
+          const msg = batchError instanceof Error ? batchError.message : String(batchError);
+          console.error(`[process-exam] Batch processing failed:`, msg);
+          // Mark all slides in batch as failed
+          for (const slide of batch) {
+            await supabase.from("slides").update({ ai_summary_json: { status: "error", error: msg } }).eq("id", slide.id);
+            results.push({ id: slide.id, ok: false, ms: 0, err: msg });
+          }
+        }
+        
+        // Add delay between batches
+        if (i + batchSize < slidesToProcess.length) {
+          await delay(1000);
+        }
+      }
+    } else {
+      // Individual processing mode (fallback or when batch processing is disabled)
+      console.log(`[process-exam] Using INDIVIDUAL processing mode`);
+      const concurrency = Number(Deno.env.get("CONCURRENCY") || 1);
+      const groups = pool(slides, Math.max(1, concurrency));
+      
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        console.log(`[process-exam] Processing batch ${i + 1}/${groups.length} with ${group.length} slide(s)`);
+        
+        if (concurrency === 1) {
+          for (const slide of group) {
+            const result = await processSlide({ supabase, slide, apiKey, youtubeApiKey, model, examId });
+            results.push(result);
+          }
+        } else {
+          const batch = await Promise.all(
+            group.map((s) => processSlide({ supabase, slide: s, apiKey, youtubeApiKey, model, examId }))
+          );
+          results.push(...batch);
+        }
+        
+        if (i < groups.length - 1) {
+          await delay(1000);
+        }
+      }
     }
 
-    const topicsInserted = results.filter(r => r.ok).length;
+    const topicsInserted = results.filter(r => r.ok && !r.skipped).length;
+    const skipped = results.filter(r => r.skipped).length;
+    const failed = results.filter(r => !r.ok).length;
+    
+    console.log(`[process-exam] Processing complete: ${topicsInserted} topics inserted, ${skipped} skipped (already exist), ${failed} failed`);
+    
     return json({
       topicsInserted,
+      skipped,
+      failed,
       diagnostics: {
         hasKey: !!apiKey,
         hasYoutubeKey: !!youtubeApiKey,

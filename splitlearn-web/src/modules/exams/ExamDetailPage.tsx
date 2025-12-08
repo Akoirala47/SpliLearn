@@ -1,15 +1,39 @@
 import { Link, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 import { useToast } from '../ui/Toast'
 import { StudyGuide } from '../study/StudyGuide'
+import { Upload } from 'lucide-react'
 
 export function ExamDetailPage() {
   const { examId } = useParams()
 
   const qc = useQueryClient()
+  
+  // Fetch exam with class information
+  const { data: examData } = useQuery({
+    queryKey: ['exam-with-class', examId],
+    enabled: !!examId,
+    queryFn: async () => {
+      if (!examId) return null
+      const { data: exam, error: examError } = await supabase
+        .from('exams')
+        .select('id, title, class_id, class:classes!inner(id, title)')
+        .eq('id', examId)
+        .single()
+      if (examError) throw examError
+      // Handle the class as either single object or array (Supabase can return either)
+      const classData = Array.isArray((exam as any).class) ? (exam as any).class[0] : (exam as any).class
+      return {
+        id: (exam as any).id,
+        title: (exam as any).title,
+        class_id: (exam as any).class_id,
+        class: classData || { id: '', title: 'Unknown Class' }
+      } as { id: string; title: string; class_id: string; class: { id: string; title: string } }
+    },
+  })
   type SlideRow = { id: string; file_url: string; ai_summary_json: { status?: 'processing' | 'done' | 'error';[k: string]: unknown } | null; created_at: string }
   const { data: slides } = useQuery<SlideRow[]>({
     queryKey: ['slides', examId],
@@ -47,6 +71,7 @@ export function ExamDetailPage() {
     return () => clearInterval(t)
   }, [slides, examId, qc])
   const { push } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   type PendingUpload = { id: string; name: string; status: 'uploading' | 'error'; error?: string }
   const [pending, setPending] = useState<PendingUpload[]>([])
   const maxSlides = 10
@@ -84,8 +109,23 @@ export function ExamDetailPage() {
     qc.invalidateQueries({ queryKey: ['slides', examId] })
     qc.invalidateQueries({ queryKey: ['topics-by-exam', examId] })
     setBatchProcessing(false)
+    
+    const skipped = (data as any)?.skipped ?? 0
+    const failed = (data as any)?.failed ?? 0
+    
     if (topicsInserted > 0) {
-      push({ title: 'Processing complete', description: `${topicsInserted} topics added`, variant: 'success' })
+      let description = `${topicsInserted} topic${topicsInserted !== 1 ? 's' : ''} added`
+      if (skipped > 0) {
+        description += `, ${skipped} skipped (already processed)`
+      }
+      if (failed > 0) {
+        description += `, ${failed} failed`
+      }
+      push({ title: 'Processing complete', description, variant: 'success' })
+    } else if (skipped > 0) {
+      push({ title: 'All slides already processed', description: `${skipped} slide${skipped !== 1 ? 's' : ''} were already processed`, variant: 'info' })
+    } else if (failed > 0) {
+      push({ title: 'Processing failed', description: `${failed} slide${failed !== 1 ? 's' : ''} failed to process. Check logs for details.`, variant: 'error' })
     } else {
       push({ title: 'No topics returned', description: 'Try again or check slides content', variant: 'error' })
     }
@@ -95,10 +135,10 @@ export function ExamDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-white" style={{ fontFamily: 'var(--font-heading)' }}>
-          Exam {examId}
+          {examData ? `${examData.class.title} - ${examData.title}` : `Exam ${examId}`}
         </h1>
         <Link to={`/exams/${examId}/learn`} className="px-4 py-2 rounded-full text-white brand-gradient">
-          Let’s Learn
+          Let's Learn
         </Link>
       </div>
       <div className="glass p-4 rounded-2xl">
@@ -122,7 +162,13 @@ export function ExamDetailPage() {
           </div>
         ) : null)}
         <div className="flex items-center gap-2">
-          <input className="block" type="file" multiple accept=".pdf,.ppt,.pptx" onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+          <input 
+            ref={fileInputRef}
+            className="hidden" 
+            type="file" 
+            multiple 
+            accept=".pdf,.ppt,.pptx" 
+            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
             const files = e.target.files
             if (!files || !examId) return
             const existing = (slides?.length ?? 0) + pending.length
@@ -131,37 +177,76 @@ export function ExamDetailPage() {
             if (chosen.length < files.length) {
               push({ title: `Limit ${maxSlides} slides`, description: 'Only the first files were queued.', variant: 'info' })
             }
+            const uploadPromises: Promise<void>[] = []
             let successCount = 0
+            let errorCount = 0
+            
             for (const file of chosen) {
               const tempId = crypto.randomUUID()
               setPending((p: PendingUpload[]) => [...p, { id: tempId, name: file.name, status: 'uploading' }])
-              const key = `${examId}/${Date.now()}-${file.name}`
-              const { data, error } = await supabase.storage.from('slides').upload(key, file)
-              if (error) {
-                setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: error.message } : x))
-                push({ title: 'Upload failed', description: error.message, variant: 'error' })
-                continue
-              }
-              const fileUrl = data?.path
-              const { data: inserted, error: insertErr } = await supabase.from('slides').insert({ exam_id: examId, file_url: fileUrl }).select('id').single()
-              if (insertErr) {
-                setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: insertErr.message } : x))
-                push({ title: 'Save failed', description: insertErr.message, variant: 'error' })
-              } else {
-                setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
-                push({ title: 'Uploaded', description: file.name, variant: 'success' })
-                qc.invalidateQueries({ queryKey: ['slides', examId] })
-                successCount++
-              }
+              
+              const uploadPromise = (async () => {
+                try {
+                  const key = `${examId}/${Date.now()}-${file.name}`
+                  const { data, error } = await supabase.storage.from('slides').upload(key, file)
+                  if (error) {
+                    setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: error.message } : x))
+                    push({ title: 'Upload failed', description: `${file.name}: ${error.message}`, variant: 'error' })
+                    errorCount++
+                    return
+                  }
+                  const fileUrl = data?.path
+                  const { data: inserted, error: insertErr } = await supabase.from('slides').insert({ exam_id: examId, file_url: fileUrl }).select('id, file_url, ai_summary_json, created_at').single()
+                  if (insertErr) {
+                    setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: insertErr.message } : x))
+                    push({ title: 'Save failed', description: `${file.name}: ${insertErr.message}`, variant: 'error' })
+                    errorCount++
+                  } else {
+                    // Optimistically update the slides query immediately
+                    qc.setQueryData<SlideRow[]>(['slides', examId], (old = []) => {
+                      const newSlide: SlideRow = {
+                        id: inserted.id,
+                        file_url: inserted.file_url,
+                        ai_summary_json: inserted.ai_summary_json,
+                        created_at: inserted.created_at
+                      }
+                      return [newSlide, ...old]
+                    })
+                    // Remove from pending after optimistic update
+                    setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
+                    successCount++
+                  }
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err)
+                  setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: msg } : x))
+                  errorCount++
+                }
+              })()
+              
+              uploadPromises.push(uploadPromise)
             }
+            
+            // Wait for all uploads to complete
+            await Promise.all(uploadPromises)
             e.currentTarget.value = ''
 
-            // Auto-process if at least one file was uploaded successfully
+            // Refresh queries to ensure we have the latest data
             if (successCount > 0) {
-              // Small delay to ensure state updates settle, though not strictly necessary with async/await
-              setTimeout(() => handleProcessAll(), 500)
+              // Invalidate to ensure fresh data, then refetch
+              await qc.invalidateQueries({ queryKey: ['slides', examId] })
+              await qc.refetchQueries({ queryKey: ['slides', examId] })
+              
+              push({ title: 'Uploads complete', description: `${successCount} file${successCount !== 1 ? 's' : ''} uploaded${errorCount > 0 ? `, ${errorCount} failed` : ''}. Starting processing...`, variant: 'success' })
+              await handleProcessAll()
             }
           }} />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="btn-pill flex items-center gap-2"
+          >
+            <Upload size={16} />
+            Upload Slides
+          </button>
           <button className="btn-pill disabled:opacity-40" disabled={!slides || slides.length === 0} onClick={handleProcessAll}>Process All</button>
         </div>
         <div className="space-y-2">
