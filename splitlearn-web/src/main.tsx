@@ -9,6 +9,7 @@ import { ClassesPage } from './modules/classes/ClassesPage'
 import { ExamsPage } from './modules/exams/ExamsPage'
 import { ExamDetailPage } from './modules/exams/ExamDetailPage'
 import { LearnPage } from './modules/learn/LearnPage'
+import { NotesPage } from './modules/notes/NotesPage'
 import { AuthProvider } from './modules/auth/AuthContext'
 import { LoginPage } from './modules/auth/LoginPage'
 import { Protected } from './modules/auth/Protected'
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
           { path: 'exams', element: <ExamsPage /> },
           { path: 'exams/:examId', element: <ExamDetailPage /> },
           { path: 'exams/:examId/learn', element: <LearnPage /> },
+          { path: 'notes', element: <NotesPage /> },
           { path: 'profile', element: <ProfilePage /> },
         ],
       },

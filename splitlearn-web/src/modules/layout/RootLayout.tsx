@@ -1,5 +1,5 @@
 import { Outlet, Link, NavLink } from 'react-router-dom'
-import { Menu, BookOpen, GraduationCap, PlayCircle, Search } from 'lucide-react'
+import { Menu, BookOpen, GraduationCap, PlayCircle, Search, FileText } from 'lucide-react'
 import { UserMenu } from './UserMenu'
 import { useProfile } from '../profile/useProfile'
 
@@ -25,6 +25,9 @@ export function RootLayout() {
           </NavLink>
           <NavLink to="/exams" className={({ isActive }) => navClass(isActive)}>
             <PlayCircle className="h-4 w-4" /> Exams
+          </NavLink>
+          <NavLink to="/notes" className={({ isActive }) => navClass(isActive)}>
+            <FileText className="h-4 w-4" /> Notes
           </NavLink>
         </nav>
       </aside>

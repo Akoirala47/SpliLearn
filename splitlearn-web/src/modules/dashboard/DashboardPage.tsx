@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useProfile } from '../profile/useProfile'
 import { GlassCard } from '../ui/GlassCard'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -14,7 +15,7 @@ export function DashboardPage() {
           <div className="text-sm text-muted">Quick Start</div>
           <div className="mt-2 flex items-center justify-between">
             <div className="text-white">Upload slides to create an exam</div>
-            <button className="btn-pill focus-ring">Start</button>
+            <Link to="/classes" className="btn-pill focus-ring">Start</Link>
           </div>
         </GlassCard>
         <GlassCard>

@@ -10,7 +10,7 @@ export function ExamDetailPage() {
   const { examId } = useParams()
 
   const qc = useQueryClient()
-  type SlideRow = { id: string; file_url: string; ai_summary_json: { status?: 'processing' | 'done' | 'error'; [k: string]: unknown } | null; created_at: string }
+  type SlideRow = { id: string; file_url: string; ai_summary_json: { status?: 'processing' | 'done' | 'error';[k: string]: unknown } | null; created_at: string }
   const { data: slides } = useQuery<SlideRow[]>({
     queryKey: ['slides', examId],
     enabled: !!examId,
@@ -62,6 +62,35 @@ export function ExamDetailPage() {
   const hasAllExtracted = stats.total > 0 && extractedCount === stats.total
   const [batchProcessing, setBatchProcessing] = useState(false)
 
+  const handleProcessAll = async () => {
+    if (!slides || slides.length === 0) return
+    setBatchProcessing(true)
+    qc.setQueryData(['slides', examId], (cur: SlideRow[] | undefined) => (cur || []).map((s) => ({ ...s, ai_summary_json: { status: 'processing' } })))
+    const { error, data } = await supabase.functions.invoke('process-exam', { body: { examId } })
+    let topicsInserted = (data as any)?.topicsInserted ?? 0
+    if (error) {
+      const { data: session } = await supabase.auth.getSession()
+      const token = session.session?.access_token
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-exam`
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ examId }) })
+        if (!r.ok) { const txt = await r.text(); push({ title: 'Process failed', description: txt || r.statusText, variant: 'error' }) }
+        else { const j = await r.json().catch(() => ({})); topicsInserted = (j as any)?.topicsInserted ?? 0 }
+      } catch (e: unknown) {
+        const msg: string = e instanceof Error ? e.message : String(e)
+        push({ title: 'Process failed', description: msg, variant: 'error' })
+      }
+    }
+    qc.invalidateQueries({ queryKey: ['slides', examId] })
+    qc.invalidateQueries({ queryKey: ['topics-by-exam', examId] })
+    setBatchProcessing(false)
+    if (topicsInserted > 0) {
+      push({ title: 'Processing complete', description: `${topicsInserted} topics added`, variant: 'success' })
+    } else {
+      push({ title: 'No topics returned', description: 'Try again or check slides content', variant: 'error' })
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -94,67 +123,48 @@ export function ExamDetailPage() {
         ) : null)}
         <div className="flex items-center gap-2">
           <input className="block" type="file" multiple accept=".pdf,.ppt,.pptx" onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
-          const files = e.target.files
-          if (!files || !examId) return
-          const existing = (slides?.length ?? 0) + pending.length
-          const available = Math.max(0, maxSlides - existing)
-          const chosen = Array.from(files).slice(0, available)
-          if (chosen.length < files.length) {
-            push({ title: `Limit ${maxSlides} slides`, description: 'Only the first files were queued.', variant: 'info' })
-          }
-          for (const file of chosen) {
-            const tempId = crypto.randomUUID()
-            setPending((p: PendingUpload[]) => [...p, { id: tempId, name: file.name, status: 'uploading' }])
-            const key = `${examId}/${Date.now()}-${file.name}`
-            const { data, error } = await supabase.storage.from('slides').upload(key, file)
-            if (error) {
-              setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: error.message } : x))
-              push({ title: 'Upload failed', description: error.message, variant: 'error' })
-              continue
+            const files = e.target.files
+            if (!files || !examId) return
+            const existing = (slides?.length ?? 0) + pending.length
+            const available = Math.max(0, maxSlides - existing)
+            const chosen = Array.from(files).slice(0, available)
+            if (chosen.length < files.length) {
+              push({ title: `Limit ${maxSlides} slides`, description: 'Only the first files were queued.', variant: 'info' })
             }
-            const fileUrl = data?.path
-            const { data: inserted, error: insertErr } = await supabase.from('slides').insert({ exam_id: examId, file_url: fileUrl }).select('id').single()
-            if (insertErr) {
-              setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: insertErr.message } : x))
-              push({ title: 'Save failed', description: insertErr.message, variant: 'error' })
-            } else {
-            setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
-              push({ title: 'Uploaded', description: file.name, variant: 'success' })
-              qc.invalidateQueries({ queryKey: ['slides', examId] })
-              // invoke text extraction immediately (fire-and-forget)
-              try { await supabase.functions.invoke('extract-slide', { body: { slideId: inserted?.id, filePath: fileUrl } }) } catch {}
-            }
-          }
-          e.currentTarget.value = ''
-        }} />
-          <button className="btn-pill disabled:opacity-40" disabled={!slides || slides.length === 0} onClick={async () => {
-            if (!slides) return
-            setBatchProcessing(true)
-            qc.setQueryData(['slides', examId], (cur: SlideRow[] | undefined) => (cur || []).map((s) => ({ ...s, ai_summary_json: { status: 'processing' } })))
-            const { error, data } = await supabase.functions.invoke('process-exam', { body: { examId } })
-            let topicsInserted = (data as any)?.topicsInserted ?? 0
-            if (error) {
-              const { data: session } = await supabase.auth.getSession()
-              const token = session.session?.access_token
-              const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-exam`
-              try {
-                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ examId }) })
-                if (!r.ok) { const txt = await r.text(); push({ title: 'Process failed', description: txt || r.statusText, variant: 'error' }) }
-                else { const j = await r.json().catch(() => ({})); topicsInserted = (j as any)?.topicsInserted ?? 0 }
-              } catch (e: unknown) {
-                const msg: string = e instanceof Error ? e.message : String(e)
-                push({ title: 'Process failed', description: msg, variant: 'error' })
+            let successCount = 0
+            for (const file of chosen) {
+              const tempId = crypto.randomUUID()
+              setPending((p: PendingUpload[]) => [...p, { id: tempId, name: file.name, status: 'uploading' }])
+              const key = `${examId}/${Date.now()}-${file.name}`
+              const { data, error } = await supabase.storage.from('slides').upload(key, file)
+              if (error) {
+                setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: error.message } : x))
+                push({ title: 'Upload failed', description: error.message, variant: 'error' })
+                continue
+              }
+              const fileUrl = data?.path
+              const { data: inserted, error: insertErr } = await supabase.from('slides').insert({ exam_id: examId, file_url: fileUrl }).select('id').single()
+              if (insertErr) {
+                setPending((p: PendingUpload[]) => p.map((x: PendingUpload) => x.id === tempId ? { ...x, status: 'error', error: insertErr.message } : x))
+                push({ title: 'Save failed', description: insertErr.message, variant: 'error' })
+              } else {
+                setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
+                push({ title: 'Uploaded', description: file.name, variant: 'success' })
+                qc.invalidateQueries({ queryKey: ['slides', examId] })
+                // invoke text extraction immediately (fire-and-forget)
+                try { await supabase.functions.invoke('extract-slide', { body: { slideId: inserted?.id, filePath: fileUrl } }) } catch { }
+                successCount++
               }
             }
-            qc.invalidateQueries({ queryKey: ['slides', examId] })
-            qc.invalidateQueries({ queryKey: ['topics-by-exam', examId] })
-            setBatchProcessing(false)
-            if (topicsInserted > 0) {
-              push({ title: 'Processing complete', description: `${topicsInserted} topics added`, variant: 'success' })
-            } else {
-              push({ title: 'No topics returned', description: 'Try again or check slides content', variant: 'error' })
+            e.currentTarget.value = ''
+
+            // Auto-process if at least one file was uploaded successfully
+            if (successCount > 0) {
+              // Small delay to ensure state updates settle, though not strictly necessary with async/await
+              setTimeout(() => handleProcessAll(), 500)
             }
-          }}>Process All</button>
+          }} />
+          <button className="btn-pill disabled:opacity-40" disabled={!slides || slides.length === 0} onClick={handleProcessAll}>Process All</button>
         </div>
         <div className="space-y-2">
           {pending.map((u: PendingUpload) => (
