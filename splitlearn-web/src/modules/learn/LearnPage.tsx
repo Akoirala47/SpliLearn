@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient'
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Play, FileText, Check, Loader2 } from 'lucide-react'
+import { ArrowLeft, Play, FileText, Check, Loader2, Clock } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 
 type Video = {
@@ -12,6 +12,7 @@ type Video = {
   title: string
   description?: string
   thumbnail_url: string
+  duration?: number // in seconds
 }
 
 type Topic = {
@@ -21,11 +22,23 @@ type Topic = {
   videos: Video[]
 }
 
+function formatDuration(seconds?: number): string {
+  if (!seconds || seconds === 0) return ''
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`
+}
+
 export function LearnPage() {
   const { examId } = useParams()
   const { user } = useAuth()
   const { typingPausesVideo, setTypingPausesVideo } = usePreferences()
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null)
+  const [selectedVideoIndex, setSelectedVideoIndex] = useState(0)
 
   // Notes State
   const [noteContent, setNoteContent] = useState('')
@@ -48,7 +61,13 @@ export function LearnPage() {
   })
 
   const activeTopic = topics?.find(t => t.id === activeTopicId)
-  const activeVideo = activeTopic?.videos?.[0]
+  const activeVideos = activeTopic?.videos || []
+  const activeVideo = activeVideos[selectedVideoIndex] || activeVideos[0]
+
+  // Reset video selection when topic changes
+  useEffect(() => {
+    setSelectedVideoIndex(0)
+  }, [activeTopicId])
 
   // Load notes when active topic changes
   useEffect(() => {
@@ -144,6 +163,22 @@ export function LearnPage() {
             </div>
 
             <div className="flex items-center gap-4">
+              {/* Video Selector - only show if multiple videos */}
+              {activeVideos.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedVideoIndex}
+                    onChange={(e) => setSelectedVideoIndex(parseInt(e.target.value, 10))}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-white/20"
+                  >
+                    {activeVideos.map((video, idx) => (
+                      <option key={video.id} value={idx} className="bg-[#1A1A2E]">
+                        Video {idx + 1}: {video.title.length > 40 ? video.title.slice(0, 40) + '...' : video.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="text-xs text-muted flex items-center gap-1.5">
                 {isSaving ? (
                   <>
@@ -239,6 +274,7 @@ export function LearnPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {topics?.map((topic) => {
           const video = topic.videos?.[0]
+          const videoCount = topic.videos?.length || 0
           return (
             <div key={topic.id} className="glass p-4 rounded-2xl group hover:bg-white/5 transition-all">
               <div className="aspect-video rounded-xl bg-black/20 mb-4 overflow-hidden relative">
@@ -250,6 +286,19 @@ export function LearnPage() {
                         <Play fill="white" className="ml-1" size={20} />
                       </div>
                     </div>
+                    {/* Video count badge */}
+                    {videoCount > 1 && (
+                      <div className="absolute top-2 right-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-sm text-xs text-white">
+                        {videoCount} videos
+                      </div>
+                    )}
+                    {/* Duration badge */}
+                    {video.duration && (
+                      <div className="absolute bottom-2 right-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-sm text-xs text-white flex items-center gap-1">
+                        <Clock size={12} />
+                        {formatDuration(video.duration)}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="w-full h-full grid place-items-center text-muted text-sm">
@@ -259,7 +308,15 @@ export function LearnPage() {
               </div>
               <h3 className="font-medium leading-snug mb-2 line-clamp-2">{topic.title}</h3>
               <div className="flex items-center justify-between mt-4">
-                <div className="text-xs text-muted">{topic.subpoints_json?.length || 0} key points</div>
+                <div className="text-xs text-muted flex items-center gap-2">
+                  <span>{topic.subpoints_json?.length || 0} key points</span>
+                  {videoCount > 0 && (
+                    <>
+                      <span>•</span>
+                      <span>{videoCount} {videoCount === 1 ? 'video' : 'videos'}</span>
+                    </>
+                  )}
+                </div>
                 <button
                   onClick={() => setActiveTopicId(topic.id)}
                   disabled={!video}

@@ -5,6 +5,7 @@ create table if not exists videos (
   title text,
   description text,
   thumbnail_url text,
+  duration integer, -- duration in seconds
   created_at timestamp with time zone default now()
 );
 

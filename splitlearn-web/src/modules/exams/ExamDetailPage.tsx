@@ -151,8 +151,6 @@ export function ExamDetailPage() {
                 setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
                 push({ title: 'Uploaded', description: file.name, variant: 'success' })
                 qc.invalidateQueries({ queryKey: ['slides', examId] })
-                // invoke text extraction immediately (fire-and-forget)
-                try { await supabase.functions.invoke('extract-slide', { body: { slideId: inserted?.id, filePath: fileUrl } }) } catch { }
                 successCount++
               }
             }
