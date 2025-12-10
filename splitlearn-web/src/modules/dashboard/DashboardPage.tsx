@@ -20,7 +20,6 @@ function useStudyStreak() {
     queryFn: async () => {
       if (!user) return 0
       
-      // Get all video completions for this user from the last 365 days
       const oneYearAgo = new Date()
       oneYearAgo.setDate(oneYearAgo.getDate() - 365)
       oneYearAgo.setHours(0, 0, 0, 0)
@@ -34,7 +33,7 @@ function useStudyStreak() {
       
       if (!completions || completions.length === 0) return 0
       
-      // Group completions by date (YYYY-MM-DD)
+      // collect unique dates with activity
       const datesWithActivity = new Set<string>()
       for (const comp of completions) {
         if (comp.completed_at) {
@@ -44,20 +43,19 @@ function useStudyStreak() {
         }
       }
       
-      // Calculate streak starting from today (or yesterday if today has no activity)
+      // count consecutive days backwards from today
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       
       let streak = 0
       let checkDate = new Date(today)
       
-      // If today has no activity, start from yesterday
+      // start from yesterday if today has no activity
       const todayStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`
       if (!datesWithActivity.has(todayStr)) {
         checkDate.setDate(checkDate.getDate() - 1)
       }
       
-      // Count consecutive days with activity
       for (let i = 0; i < 365; i++) {
         const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`
         
@@ -79,7 +77,7 @@ export function DashboardPage() {
   const { data: examProgress } = useExamProgress()
   const { data: studyStreak } = useStudyStreak()
   
-  // Calculate overall progress across all exams
+  // calculate overall progress across all exams
   const overallProgress = useMemo(() => {
     if (!examProgress || examProgress.length === 0) return { percentage: 0, completed: 0, total: 0 }
     const totalVideos = examProgress.reduce((sum, exam) => sum + exam.totalVideos, 0)
@@ -97,7 +95,6 @@ export function DashboardPage() {
         Welcome back, {firstName}
       </h1>
       
-      {/* Quick Start Menu - Full Width */}
       <GlassCard>
         <div className="text-sm text-muted mb-4">Quick Start</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -142,9 +139,7 @@ export function DashboardPage() {
         </div>
       </GlassCard>
 
-      {/* Second Row - 3 Cells */}
       <div className="grid gap-6 grid-cols-1 md:grid-cols-3">
-        {/* Overall Study Progress - Circular */}
         <GlassCard>
           <div className="text-sm text-muted mb-4">Overall Study Progress</div>
           <div className="flex flex-col items-center justify-center py-4">
@@ -159,7 +154,6 @@ export function DashboardPage() {
           </div>
         </GlassCard>
 
-        {/* Progress by Exam */}
         <GlassCard>
           <div className="text-sm text-muted mb-4">Progress by Exam</div>
           <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
@@ -169,7 +163,6 @@ export function DashboardPage() {
                   <div className="text-white font-medium text-sm">{exam.examTitle}</div>
                   <div className="text-xs text-muted mb-2">{exam.className}</div>
                   
-                  {/* Video Progress Bar */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted">Videos</span>
@@ -180,7 +173,6 @@ export function DashboardPage() {
                     <ProgressBar value={exam.progressPercentage} />
                   </div>
                   
-                  {/* Countdown Bar */}
                   {exam.examDate && (
                     <div className="pt-2">
                       <CountdownBar examDate={exam.examDate} />
@@ -194,7 +186,6 @@ export function DashboardPage() {
           </div>
         </GlassCard>
 
-        {/* Study Streak Counter */}
         <GlassCard>
           <div className="text-sm text-muted mb-4 flex items-center gap-2">
             <Flame size={16} className="text-orange-400" />

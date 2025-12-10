@@ -12,10 +12,12 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
 
+  // validate email format and password length for form submission
   const isEmailValid = useMemo(() => /.+@.+\..+/.test(email), [email])
   const isPasswordValid = useMemo(() => password.length >= 6, [password])
   const canSubmit = isEmailValid && isPasswordValid && !loading
 
+  // handle login or signup based on current mode
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -32,6 +34,7 @@ export function LoginPage() {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center p-4">
+      {/* animated transition between landing page and login form */}
       <AnimatePresence mode="wait">
         {!showLogin ? (
           <motion.div

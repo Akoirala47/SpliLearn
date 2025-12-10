@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-// import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../auth/AuthContext'
 
 export function OnboardingGate({ children }: { children: React.ReactNode }) {

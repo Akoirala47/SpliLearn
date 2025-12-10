@@ -2,7 +2,7 @@ import { useId } from 'react'
 
 type Props = {
   value: number // 0-100
-  size?: number // diameter in pixels
+  size?: number // this is the diameter in pixels
   strokeWidth?: number
   className?: string
   children?: React.ReactNode
@@ -10,11 +10,11 @@ type Props = {
 
 export function CircularProgress({ value, size = 120, strokeWidth = 8, className = '', children }: Props) {
   const gradientId = useId()
+  // calculate circle radius and stroke dash offset for progress visualization
   const radius = (size - strokeWidth) / 2
   const circumference = radius * 2 * Math.PI
-  const offset = circumference - (value / 100) * circumference
-  
   const pct = Math.max(0, Math.min(100, value))
+  const offset = circumference - (pct / 100) * circumference
   
   return (
     <div className={`relative ${className}`} style={{ width: size, height: size }}>
@@ -23,7 +23,6 @@ export function CircularProgress({ value, size = 120, strokeWidth = 8, className
         height={size}
         className="transform -rotate-90"
       >
-        {/* Background circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -32,7 +31,6 @@ export function CircularProgress({ value, size = 120, strokeWidth = 8, className
           stroke="rgba(255, 255, 255, 0.1)"
           strokeWidth={strokeWidth}
         />
-        {/* Progress circle */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -52,7 +50,6 @@ export function CircularProgress({ value, size = 120, strokeWidth = 8, className
           </linearGradient>
         </defs>
       </svg>
-      {/* Center content */}
       <div className="absolute inset-0 flex items-center justify-center">
         {children}
       </div>

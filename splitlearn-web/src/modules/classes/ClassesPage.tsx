@@ -21,7 +21,6 @@ function useExamsByClasses(classIds: string[]) {
         .order('created_at', { ascending: false })
       if (error) throw error
       
-      // Group exams by class_id
       const grouped: Record<string, ExamRow[]> = {}
       for (const exam of (data || [])) {
         if (!grouped[exam.class_id]) grouped[exam.class_id] = []
@@ -57,7 +56,6 @@ export function ClassesPage() {
           
           return (
             <div key={c.id} className="glass p-4 rounded-2xl space-y-4">
-              {/* Class Header */}
               <div className="flex items-center justify-between gap-2">
                 <input 
                   className="flex-1 bg-transparent outline-none text-white text-lg font-medium" 
@@ -73,12 +71,10 @@ export function ClassesPage() {
                 </button>
               </div>
               
-              {/* Exam Count */}
               <div className="text-xs text-muted">
                 {exams.length} exam{exams.length !== 1 ? 's' : ''}
               </div>
               
-              {/* Exams List */}
               <div className="space-y-2">
                 {exams.length > 0 ? (
                   exams.map((exam) => (

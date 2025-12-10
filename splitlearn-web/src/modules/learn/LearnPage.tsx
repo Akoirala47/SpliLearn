@@ -41,11 +41,11 @@ export function LearnPage() {
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null)
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(0)
 
-  // Notes State
   const [noteContent, setNoteContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState('')
 
+  // fetch all topics with their associated videos for the exam
   const { data: topics } = useQuery<Topic[]>({
     queryKey: ['topics-with-videos', examId],
     enabled: !!examId,
@@ -57,7 +57,6 @@ export function LearnPage() {
         .order('created_at', { ascending: true })
 
       if (topicsError) throw topicsError
-      // Sort videos by subpoint_index
       const topicsWithSortedVideos = (topicsData || []).map(topic => ({
         ...topic,
         videos: (topic.videos || []).sort((a: any, b: any) => {
@@ -70,7 +69,6 @@ export function LearnPage() {
     }
   })
 
-  // Fetch video completions for this exam
   const allVideoIds = topics?.flatMap(t => t.videos?.map(v => v.id) || []) || []
   const { data: completions } = useQuery<Record<string, boolean>>({
     queryKey: ['video-completions', examId, user?.id, allVideoIds.sort().join(',')],
@@ -93,7 +91,7 @@ export function LearnPage() {
     },
   })
 
-  // Mark video as complete mutation
+  // toggle video completion status for progress tracking
   const markVideoComplete = useMutation({
     mutationFn: async ({ videoId, completed }: { videoId: string; completed: boolean }) => {
       if (!user || !examId) throw new Error('User or exam ID missing')
@@ -125,15 +123,12 @@ export function LearnPage() {
     },
   })
 
-
-  // Initialize from URL params after topics are loaded
   useEffect(() => {
     if (!topics) return
     const topicId = searchParams.get('topicId')
     const videoId = searchParams.get('videoId')
     if (topicId) {
       setActiveTopicId(topicId)
-      // Find video index if videoId is provided
       if (videoId) {
         const topic = topics.find(t => t.id === topicId)
         if (topic) {
@@ -149,18 +144,17 @@ export function LearnPage() {
   const activeTopic = topics?.find(t => t.id === activeTopicId)
   const activeVideos = activeTopic?.videos || []
 
-  // Combine active videos with alternative videos for selection
-  // Start with just the active videos from database
   const baseVideos = activeVideos
   const currentSelectedVideo = baseVideos[selectedVideoIndex] || baseVideos[0]
 
-  // Fetch alternative videos when the selected video changes
+  // fetch alternative videos when a video is selected
   const { data: alternativeVideos, isLoading: loadingAlternatives } = useQuery<Video[]>({
     queryKey: ['alternative-videos', currentSelectedVideo?.youtube_id, activeTopic?.title],
     enabled: !!currentSelectedVideo && !!activeTopic,
     queryFn: async () => {
       if (!currentSelectedVideo || !activeTopic) return []
       
+      // exclude videos already in the list to avoid duplicates
       const excludeIds = baseVideos.map(v => v.youtube_id)
       const { data, error } = await supabase.functions.invoke('get-alternative-videos', {
         body: {
@@ -179,12 +173,11 @@ export function LearnPage() {
     },
   })
 
-  // Combine base videos with alternative videos
+  // combine base videos with alternatives, avoiding duplicates
   const availableVideos = (() => {
     const allVideos = [...baseVideos]
     const existingIds = new Set(baseVideos.map(v => v.youtube_id))
     
-    // Add alternative videos that aren't already in the list
     if (alternativeVideos) {
       for (const altVideo of alternativeVideos) {
         if (!existingIds.has(altVideo.youtube_id)) {
@@ -203,7 +196,7 @@ export function LearnPage() {
     return allVideos
   })()
 
-  // Ensure selectedVideoIndex is valid
+  // reset video index if it becomes invalid
   useEffect(() => {
     if (selectedVideoIndex >= availableVideos.length && availableVideos.length > 0) {
       setSelectedVideoIndex(0)
@@ -212,12 +205,12 @@ export function LearnPage() {
 
   const activeVideo = availableVideos[selectedVideoIndex] || currentSelectedVideo
 
-  // Reset video selection when topic changes
+  // reset to first video when topic changes
   useEffect(() => {
     setSelectedVideoIndex(0)
   }, [activeTopicId])
 
-  // Load notes when active topic changes
+  // load saved notes when topic changes
   useEffect(() => {
     if (!activeTopicId || !user) return
 
@@ -240,7 +233,7 @@ export function LearnPage() {
     return () => { active = false }
   }, [activeTopicId, user])
 
-  // Auto-save logic
+  // auto-save notes after 1 second of inactivity
   useEffect(() => {
     if (!activeTopicId || !user || noteContent === lastSaved) return
 
@@ -260,11 +253,10 @@ export function LearnPage() {
     return () => clearTimeout(timer)
   }, [noteContent, activeTopicId, user, lastSaved])
 
-
-  // Resizable Split View State
   const [videoHeightPct, setVideoHeightPct] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
 
+  // handle resizable split view between video and notes
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return
@@ -296,7 +288,6 @@ export function LearnPage() {
   if (activeTopic && activeVideo) {
     return (
       <div className="h-[calc(100vh-6rem)] flex gap-4">
-        {/* Main Content */}
         <div className="flex-1 flex flex-col gap-4 min-w-0">
           <div className="flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -311,7 +302,6 @@ export function LearnPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* Video Selector - show if we have multiple videos (including alternatives) */}
               {availableVideos.length > 1 && (
                 <div className="flex items-center gap-2">
                   <select
@@ -343,10 +333,9 @@ export function LearnPage() {
                 ) : (
                   <>
                     <Check size={12} /> Saved
-                  </>
-                )}
+                    </>
+                  )}
               </div>
-              {/* Completion Button */}
               {activeVideo.id && user && (
                 <button
                   onClick={() => {
@@ -382,7 +371,6 @@ export function LearnPage() {
           </div>
 
           <div id="split-container" className="flex-1 flex flex-col min-h-0 relative select-none">
-            {/* Top Pane: Video + Description */}
             <div style={{ height: `${videoHeightPct}%` }} className="flex flex-col min-h-0 gap-4 overflow-y-auto pb-2">
               <div className="glass rounded-2xl overflow-hidden bg-black shrink-0 aspect-video w-full max-w-4xl mx-auto relative">
                 <iframe
@@ -401,7 +389,6 @@ export function LearnPage() {
                 </div>
               )}
               
-              {/* Alternative Videos - Show 3 alternatives that aren't currently selected */}
               {alternativeVideos && alternativeVideos.length > 0 && (
                 <div className="glass rounded-2xl p-4 max-w-4xl mx-auto w-full shrink-0">
                   <h3 className="font-medium text-white mb-3">Alternative Videos</h3>
@@ -417,8 +404,6 @@ export function LearnPage() {
                             if (videoIndex >= 0) {
                               setSelectedVideoIndex(videoIndex)
                             } else {
-                              // Video not in availableVideos yet, but should be after useEffect runs
-                              // For now, find it in availableVideos by searching
                               const idx = availableVideos.findIndex(v => v.youtube_id === altVideo.youtube_id)
                               if (idx >= 0) {
                                 setSelectedVideoIndex(idx)
@@ -462,7 +447,6 @@ export function LearnPage() {
               )}
             </div>
 
-            {/* Drag Handle */}
             <div
               className="h-4 flex items-center justify-center cursor-row-resize hover:bg-white/5 transition-colors shrink-0 -mx-4 px-4"
               onMouseDown={(e) => {
@@ -475,7 +459,6 @@ export function LearnPage() {
               <div className="w-16 h-1 rounded-full bg-white/20" />
             </div>
 
-            {/* Bottom Pane: Notes */}
             <div style={{ height: `${100 - videoHeightPct}%` }} className="flex flex-col min-h-0 pt-2">
               <div className="glass rounded-2xl p-6 notes-paper flex flex-col flex-1 w-full max-w-4xl mx-auto relative">
                 <div className="mb-4 opacity-70 text-sm font-medium flex items-center gap-2">
@@ -523,13 +506,11 @@ export function LearnPage() {
                         <Play fill="white" className="ml-1" size={20} />
                       </div>
                     </div>
-                    {/* Video count badge */}
                     {videoCount > 1 && (
                       <div className="absolute top-2 right-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-sm text-xs text-white">
                         {videoCount} videos
                       </div>
                     )}
-                    {/* Duration badge */}
                     {video.duration && (
                       <div className="absolute bottom-2 right-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-sm text-xs text-white flex items-center gap-1">
                         <Clock size={12} />

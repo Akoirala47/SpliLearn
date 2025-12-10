@@ -12,6 +12,7 @@ export type ExamProgress = {
   progressPercentage: number
 }
 
+// calculate progress for all exams by counting completed videos
 export function useExamProgress() {
   const { user } = useAuth()
   
@@ -21,7 +22,6 @@ export function useExamProgress() {
     queryFn: async (): Promise<ExamProgress[]> => {
       if (!user) return []
       
-      // Get all exams with their classes and dates
       const { data: exams, error: examsError } = await supabase
         .from('exams')
         .select(`
@@ -40,7 +40,6 @@ export function useExamProgress() {
       
       const examIds = exams.map(e => e.id)
       
-      // Get all videos for these exams
       const { data: slides, error: slidesError } = await supabase
         .from('slides')
         .select('id, exam_id')
@@ -66,7 +65,7 @@ export function useExamProgress() {
       
       if (videosError) throw videosError
       
-      // Group videos by exam
+      // map videos to their respective exams through topics and slides
       const videoIds: string[] = []
       const videosByExam: Record<string, string[]> = {}
       
@@ -82,7 +81,6 @@ export function useExamProgress() {
         videoIds.push(video.id)
       }
       
-      // Get completions
       const { data: completions, error: completionsError } = await supabase
         .from('video_completions')
         .select('video_id, exam_id')
@@ -91,14 +89,14 @@ export function useExamProgress() {
       
       if (completionsError) throw completionsError
       
-      // Group completions by exam
+      // group completions by exam for progress calculation
       const completionsByExam: Record<string, string[]> = {}
       for (const comp of (completions || [])) {
         if (!completionsByExam[comp.exam_id]) completionsByExam[comp.exam_id] = []
         completionsByExam[comp.exam_id].push(comp.video_id)
       }
       
-      // Calculate progress for each exam
+      // calculate percentage for each exam
       const progress: ExamProgress[] = exams.map((exam: any) => {
         const totalVideos = videosByExam[exam.id]?.length || 0
         const completedVideos = completionsByExam[exam.id]?.length || 0

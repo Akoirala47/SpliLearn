@@ -11,6 +11,7 @@ import { useAuth } from '../auth/AuthContext'
 
 type TopicRow = { id: string; slide_id: string; title: string; subpoints_json: string[] | null }
 
+// fetch topics for multiple exams and group by exam id
 function useTopicsByExams(examIds: string[]) {
   return useQuery({
     queryKey: ['topics-by-exams', examIds.sort().join(',')],
@@ -18,7 +19,6 @@ function useTopicsByExams(examIds: string[]) {
     queryFn: async (): Promise<Record<string, TopicRow[]>> => {
       if (examIds.length === 0) return {}
       
-      // Get all slides for these exams
       const { data: slides, error: slidesErr } = await supabase
         .from('slides')
         .select('id, exam_id')
@@ -32,7 +32,6 @@ function useTopicsByExams(examIds: string[]) {
         examIdBySlideId[slide.id] = slide.exam_id
       }
       
-      // Get all topics for these slides
       const { data: topics, error: topicsErr } = await supabase
         .from('topics')
         .select('id, slide_id, title, subpoints_json, created_at')
@@ -40,7 +39,6 @@ function useTopicsByExams(examIds: string[]) {
         .order('created_at', { ascending: true })
       if (topicsErr) throw topicsErr
       
-      // Group topics by exam_id
       const grouped: Record<string, TopicRow[]> = {}
       for (const topic of (topics || [])) {
         const examId = examIdBySlideId[topic.slide_id]
@@ -62,6 +60,7 @@ type TopicProgress = {
   progressPercentage: number
 }
 
+// calculate video completion progress for each topic within exams
 function useTopicProgress(examIds: string[], userId?: string) {
   return useQuery<Record<string, TopicProgress[]>>({
     queryKey: ['topic-progress', examIds.sort().join(','), userId],
@@ -69,7 +68,6 @@ function useTopicProgress(examIds: string[], userId?: string) {
     queryFn: async () => {
       if (!userId || examIds.length === 0) return {}
       
-      // Get all topics for these exams
       const { data: slides } = await supabase
         .from('slides')
         .select('id, exam_id')
@@ -91,7 +89,6 @@ function useTopicProgress(examIds: string[], userId?: string) {
         examIdBySlideId[slide.id] = slide.exam_id
       }
       
-      // Get all videos for these topics
       const { data: videos } = await supabase
         .from('videos')
         .select('id, topic_id')
@@ -99,17 +96,14 @@ function useTopicProgress(examIds: string[], userId?: string) {
       
       if (!videos || videos.length === 0) return {}
       
-      // Group videos by topic_id
       const videosByTopic: Record<string, string[]> = {}
       for (const video of videos) {
         if (!videosByTopic[video.topic_id]) videosByTopic[video.topic_id] = []
         videosByTopic[video.topic_id].push(video.id)
       }
       
-      // Get all video IDs
       const allVideoIds = Object.values(videosByTopic).flat()
       
-      // Get completions for this user and these exams
       const { data: completions } = await supabase
         .from('video_completions')
         .select('video_id, exam_id')
@@ -117,12 +111,12 @@ function useTopicProgress(examIds: string[], userId?: string) {
         .in('exam_id', examIds)
         .in('video_id', allVideoIds)
       
-      // Group completions by video_id
+      // use set for fast lookup of completed videos
       const completedVideoIds = new Set((completions || []).map(c => c.video_id))
       
-      // Calculate progress per topic, grouped by exam
       const progressByExam: Record<string, TopicProgress[]> = {}
       
+      // calculate progress percentage for each topic
       for (const topic of topics) {
         const examId = examIdBySlideId[topic.slide_id]
         if (!examId) continue
@@ -150,6 +144,7 @@ export function ExamsPage() {
   const { user } = useAuth()
   const { data: classes } = useClasses()
   const [selectedClassId, setSelectedClassId] = useState<string | undefined>(undefined)
+  // auto-select first class if none selected
   useEffect(() => {
     if (!selectedClassId && classes && classes.length > 0) {
       setSelectedClassId(classes[0].id)

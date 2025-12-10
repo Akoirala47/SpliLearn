@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../auth/AuthContext'
 import { useState } from 'react'
@@ -34,18 +34,16 @@ type ExamNotes = {
 
 export function NotesPage() {
   const { user } = useAuth()
-  const queryClient = useQueryClient()
   const [expandedExams, setExpandedExams] = useState<Record<string, boolean>>({})
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({})
 
-  // Fetch all exams with classes and their topics/notes
+  // fetch all exams with their topics, videos, and notes organized hierarchically
   const { data: examNotes, isLoading } = useQuery<ExamNotes[]>({
     queryKey: ['all-exam-notes', user?.id],
     enabled: !!user,
     queryFn: async () => {
       if (!user) return []
 
-      // Get all exams with their classes
       const { data: exams, error: examsError } = await supabase
         .from('exams')
         .select(`
@@ -63,7 +61,6 @@ export function NotesPage() {
 
       const examIds = exams.map((e: any) => e.id)
 
-      // Get all slides for these exams
       const { data: slides } = await supabase
         .from('slides')
         .select('id, exam_id')
@@ -73,7 +70,6 @@ export function NotesPage() {
 
       const slideIds = slides.map(s => s.id)
 
-      // Get all topics for these slides with their videos
       const { data: topics } = await supabase
         .from('topics')
         .select(`
@@ -97,20 +93,19 @@ export function NotesPage() {
         examIdBySlideId[slide.id] = slide.exam_id
       }
 
-      // Get all notes for these topics
       const { data: notes } = await supabase
         .from('topic_notes')
         .select('id, topic_id, content, updated_at')
         .eq('user_id', user.id)
         .in('topic_id', topicIds)
 
-      // Organize by exam
+      // map notes by topic id for quick lookup
       const notesByTopic: Record<string, typeof notes[0]> = {}
       for (const note of (notes || [])) {
         notesByTopic[note.topic_id] = note
       }
 
-      // Build exam notes structure
+      // organize exams with nested topics and notes
       const result: ExamNotes[] = exams.map((exam: any) => {
         const examSlides = slides.filter(s => s.exam_id === exam.id)
         const examSlideIds = examSlides.map(s => s.id)
@@ -140,11 +135,11 @@ export function NotesPage() {
         }
       })
 
-      return result.filter(e => e.topics.length > 0) // Only show exams with topics
+      return result.filter(e => e.topics.length > 0)
     },
   })
 
-  // Export functions
+  // export functions for downloading notes as text files
   const exportNote = (content: string, filename: string) => {
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -157,6 +152,7 @@ export function NotesPage() {
     URL.revokeObjectURL(url)
   }
 
+  // export single topic note with associated videos
   const exportTopicNote = (topic: TopicNote, examTitle: string) => {
     if (!topic.content) return
     const videoList = topic.videos.length > 0 
@@ -167,6 +163,7 @@ export function NotesPage() {
     exportNote(content, filename)
   }
 
+  // export all notes for an exam, grouped by topic
   const exportAllTopicNotes = (exam: ExamWithClass, topics: TopicNote[]) => {
     const notes = topics.filter(t => t.content).map(t => {
       const videoList = t.videos.length > 0 
@@ -181,6 +178,7 @@ export function NotesPage() {
     exportNote(notes, filename)
   }
 
+  // export all notes across all exams with hierarchical structure
   const exportAllExamNotes = (examNotes: ExamNotes[]) => {
     const allNotes = examNotes.map(examNote => {
       const topicNotes = examNote.topics
@@ -254,7 +252,6 @@ export function NotesPage() {
           
           return (
             <div key={examNote.exam.examId} className="glass p-4 rounded-2xl space-y-3">
-              {/* Exam Header */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 flex-1">
                   <button
@@ -284,7 +281,6 @@ export function NotesPage() {
                 )}
               </div>
 
-              {/* Topics List */}
               {isExamExpanded && (
                 <div className="space-y-2 border-l-2 border-white/10 pl-4 ml-2">
                   {examNote.topics.map((topic) => {
@@ -323,10 +319,8 @@ export function NotesPage() {
                           </div>
                         </div>
 
-                        {/* Videos and Note Content */}
                         {isTopicExpanded && (
                           <div className="ml-6 space-y-2">
-                            {/* Videos List */}
                             {topic.videos.length > 0 && (
                               <div className="glass p-2 rounded-lg space-y-1">
                                 <div className="text-xs font-medium text-muted mb-1">Videos:</div>
@@ -338,7 +332,6 @@ export function NotesPage() {
                               </div>
                             )}
                             
-                            {/* Note Content */}
                             {hasNote ? (
                               <div className="glass p-3 rounded-lg space-y-2">
                                 <div className="text-xs text-muted whitespace-pre-wrap leading-relaxed">

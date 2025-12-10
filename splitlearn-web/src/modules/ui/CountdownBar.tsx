@@ -6,6 +6,7 @@ interface CountdownBarProps {
 }
 
 export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
+  // calculate days remaining, progress percentage, and status color based on exam date
   const { daysRemaining, daysPassed, percentage, isOverdue, status } = useMemo(() => {
     if (!examDate) {
       return { daysRemaining: null, daysPassed: null, percentage: 0, isOverdue: false, status: 'no-date' }
@@ -24,8 +25,6 @@ export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
     const daysPassed = Math.max(0, 30 - daysRemaining)
     const isOverdue = diffDays < 0
     
-    // Calculate percentage: 100% = 30+ days remaining, 0% = exam day or past
-    // The bar starts at 100% and decreases as the exam approaches
     const maxDays = 30
     let percentage = 100
     
@@ -34,10 +33,10 @@ export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
     } else if (daysRemaining > maxDays) {
       percentage = 100
     } else {
-      // Invert: 30 days = 100%, 0 days = 0%
       percentage = (daysRemaining / maxDays) * 100
     }
     
+    // determine status color based on urgency
     let status: 'good' | 'warning' | 'urgent' | 'overdue' | 'no-date' = 'no-date'
     if (isOverdue) {
       status = 'overdue'
@@ -61,6 +60,7 @@ export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
     )
   }
 
+  // return tailwind color class for progress bar based on status
   const getBarColor = () => {
     switch (status) {
       case 'overdue':
@@ -76,6 +76,7 @@ export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
     }
   }
 
+  // format days remaining text with special cases for today/tomorrow/overdue
   const getStatusText = () => {
     if (isOverdue) {
       return `${Math.abs(daysRemaining!)} day${Math.abs(daysRemaining!) !== 1 ? 's' : ''} overdue`
@@ -98,10 +99,8 @@ export function CountdownBar({ examDate, className = '' }: CountdownBarProps) {
             style={{ width: `${percentage}%` }}
           />
         </div>
-        {/* Markers for days - positioned at 0, 10, 20, 30 day marks */}
         <div className="absolute inset-0 flex justify-between items-center pointer-events-none">
           {[0, 10, 20, 30].map((day) => {
-            // Position markers: 0 days = 0% (right), 30 days = 100% (left)
             const position = ((30 - day) / 30) * 100
             return (
               <div

@@ -37,7 +37,7 @@ export function StudyGuide({ examId }: { examId: string }) {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
-  // Fetch videos for all topics with subpoint_index
+  // fetch videos for each topic and group by topic id
   const topicIds = topics?.map(t => t.id) || []
   const videoIds: string[] = []
   const { data: videosByTopic } = useQuery<Record<string, Video[]>>({
@@ -53,7 +53,6 @@ export function StudyGuide({ examId }: { examId: string }) {
       
       if (error) throw error
       
-      // Group videos by topic_id and subpoint_index
       const grouped: Record<string, Video[]> = {}
       for (const video of (data || [])) {
         const topicId = (video as any).topic_id
@@ -73,7 +72,6 @@ export function StudyGuide({ examId }: { examId: string }) {
     },
   })
 
-  // Fetch completion status for all videos
   const { data: completions } = useQuery<Record<string, VideoCompletion>>({
     queryKey: ['video-completions', examId, user?.id, videoIds.sort().join(',')],
     enabled: !!user && !!examId && videoIds.length > 0,
@@ -96,7 +94,7 @@ export function StudyGuide({ examId }: { examId: string }) {
     },
   })
 
-  // Toggle completion mutation
+  // toggle completion status for individual videos in study guide
   const toggleCompletion = useMutation({
     mutationFn: async ({ videoId, completed }: { videoId: string; completed: boolean }) => {
       if (!user || !examId) throw new Error('User or exam ID missing')
@@ -148,16 +146,15 @@ export function StudyGuide({ examId }: { examId: string }) {
             </button>
             {isOpen ? (
               <div className="mt-3 space-y-3">
-                {/* Show subpoints with associated videos and checkmarks */}
                 <div className="space-y-3">
                   {(t.subpoints_json || []).map((sp, subpointIdx) => {
-                    // Find video for this subpoint index (exact match - backend creates one per subpoint)
+                    // find video associated with this subpoint index
                     const videoForSubpoint = videos.find(v => v.subpoint_index === subpointIdx)
                     
                     const isCompleted = videoForSubpoint ? completions?.[videoForSubpoint.id] : false
                     
-                    // Check if this video (by youtube_id) is shared with other subpoints
-                    const sharedSubpoints = videoForSubpoint 
+                    // check if same video is used by other subpoints
+                    const sharedSubpoints = videoForSubpoint
                       ? videos
                           .filter(v => 
                             v.youtube_id === videoForSubpoint.youtube_id && 
@@ -171,7 +168,6 @@ export function StudyGuide({ examId }: { examId: string }) {
                     
                     return (
                       <div key={subpointIdx} className="flex items-start gap-3">
-                        {/* Checkmark or bullet */}
                         <button
                           onClick={() => {
                             if (videoForSubpoint && user) {
@@ -191,7 +187,6 @@ export function StudyGuide({ examId }: { examId: string }) {
                           )}
                         </button>
                         
-                        {/* Subpoint text and video */}
                         <div className="flex-1 space-y-2">
                           <div className="text-sm text-white/90">
                             {sp}

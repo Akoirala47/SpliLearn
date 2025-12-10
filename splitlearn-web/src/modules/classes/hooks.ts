@@ -21,6 +21,7 @@ export function useClasses() {
   })
 }
 
+// create class with optimistic update
 export function useCreateClass() {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -30,6 +31,7 @@ export function useCreateClass() {
       return optimistic
     },
     onMutate: async (title) => {
+      // optimistic update adds class immediately before server confirms
       await qc.cancelQueries({ queryKey: ['classes', user?.id] })
       const prev = qc.getQueryData<ClassRow[]>(['classes', user?.id]) || []
       const optimistic: ClassRow = { id: 'optimistic-' + Date.now(), user_id: user!.id, title, created_at: new Date().toISOString() }

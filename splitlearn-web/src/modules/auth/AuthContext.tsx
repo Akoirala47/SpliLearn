@@ -19,9 +19,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // initialize auth state from session and listen for changes
   useEffect(() => {
     let isMounted = true
 
+    // get initial session on mount
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return
       setSession(data.session ?? null)
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
     })
 
+    // listen for auth state changes (login, logout, token refresh)
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
       setUser(newSession?.user ?? null)
@@ -40,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // auth methods for sign in, sign up, and sign out
   const value = useMemo<AuthContextValue>(() => ({
     user,
     session,
@@ -51,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async signUpWithEmailPassword(email, password) {
       const { data, error } = await supabase.auth.signUp({ email, password })
       if (error) throw error
+      // create user profile on signup
       const signedUser = data.user
       if (signedUser) {
         await supabase.from('profiles').upsert({ id: signedUser.id, email: signedUser.email ?? null })

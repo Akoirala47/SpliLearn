@@ -19,18 +19,20 @@ export function useExams(classId?: string) {
   })
 }
 
+// create exam with optimistic update and required date
 export function useCreateExam(classId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (input: { title: string; date: string }) => input,
     onMutate: async (input) => {
+      // optimistic update for instant UI feedback
       await qc.cancelQueries({ queryKey: ['exams', classId] })
       const prev = qc.getQueryData<ExamRow[]>(['exams', classId]) || []
       const optimistic: ExamRow = { 
         id: 'optimistic-' + Date.now(), 
         class_id: classId, 
         title: input.title, 
-        date: input.date, // Required now
+        date: input.date,
         created_at: new Date().toISOString() 
       }
       qc.setQueryData(['exams', classId], [optimistic, ...prev])
@@ -42,7 +44,7 @@ export function useCreateExam(classId: string) {
         const { error } = await supabase.from('exams').insert({ 
           class_id: classId, 
           title: input.title,
-          date: input.date // Required
+          date: input.date
         })
         if (error) console.error(error)
       }

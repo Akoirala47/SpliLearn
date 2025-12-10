@@ -11,6 +11,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined)
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
 
+  // add toast and auto-dismiss after 3.5 seconds
   const push = useCallback((toast: Omit<Toast, 'id'>) => {
     const id = crypto.randomUUID()
     setToasts((t) => [...t, { id, ...toast }])
@@ -37,13 +38,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export function useToast() {
   const ctx = useContext(ToastContext)
   if (!ctx) throw new Error('useToast must be used within ToastProvider')
   return ctx
 }
 
+// return color class for toast variant indicator dot
 function dotClass(variant?: Toast['variant']) {
   if (variant === 'success') return 'bg-[--color-success]'
   if (variant === 'error') return 'bg-[--color-danger]'

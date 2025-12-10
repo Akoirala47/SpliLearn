@@ -9,6 +9,7 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
+  // load user profile data from database on mount
   useEffect(() => {
     let active = true
     async function load() {
@@ -25,6 +26,7 @@ export function ProfilePage() {
     return () => { active = false }
   }, [user])
 
+  // save profile changes to database
   async function save() {
     if (!user) return
     setSaving(true)

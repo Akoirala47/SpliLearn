@@ -14,6 +14,7 @@ export function RootLayout() {
           <img src="/vite.svg" alt="SplitLearn" className="h-8 w-8" />
           <Link to="/" className="font-semibold">SplitLearn</Link>
         </div>
+        {/* navigation links with active state styling */}
         <nav className="flex flex-col gap-1">
           <NavLink to="/" end className={({ isActive }) => navClass(isActive)}>
             <BookOpen className="h-4 w-4" /> Dashboard

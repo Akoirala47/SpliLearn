@@ -12,7 +12,7 @@ export function ExamDetailPage() {
 
   const qc = useQueryClient()
   
-  // Fetch exam with class information
+  // fetch exam details with class information
   const { data: examData } = useQuery({
     queryKey: ['exam-with-class', examId],
     enabled: !!examId,
@@ -24,7 +24,6 @@ export function ExamDetailPage() {
         .eq('id', examId)
         .single()
       if (examError) throw examError
-      // Handle the class as either single object or array (Supabase can return either)
       const classData = Array.isArray((exam as any).class) ? (exam as any).class[0] : (exam as any).class
       return {
         id: (exam as any).id,
@@ -48,7 +47,6 @@ export function ExamDetailPage() {
       return data as SlideRow[]
     },
   })
-  // Extracted texts progress
   const { data: extracted } = useQuery<{ slide_id: string }[]>({
     queryKey: ['slide_texts', examId, (slides || []).map(s => s.id).join(',')],
     enabled: !!examId && (slides || []).length > 0,
@@ -62,7 +60,7 @@ export function ExamDetailPage() {
       return data as { slide_id: string }[]
     },
   })
-  // Auto-refresh while any slide is processing
+  // auto-refresh slides list while processing
   useEffect(() => {
     if (!examId) return
     const isProcessing = (slides || []).some(s => s.ai_summary_json?.status === 'processing')
@@ -75,6 +73,7 @@ export function ExamDetailPage() {
   type PendingUpload = { id: string; name: string; status: 'uploading' | 'error'; error?: string }
   const [pending, setPending] = useState<PendingUpload[]>([])
   const maxSlides = 10
+  // calculate slide processing statistics
   const stats = useMemo(() => {
     const list = slides || []
     const done = list.filter(s => s.ai_summary_json?.status === 'done').length
@@ -87,12 +86,15 @@ export function ExamDetailPage() {
   const hasAllExtracted = stats.total > 0 && extractedCount === stats.total
   const [batchProcessing, setBatchProcessing] = useState(false)
 
+  // process all slides through gemini to extract topics and generate videos
   const handleProcessAll = async () => {
     if (!slides || slides.length === 0) return
     setBatchProcessing(true)
+    // mark all slides as processing
     qc.setQueryData(['slides', examId], (cur: SlideRow[] | undefined) => (cur || []).map((s) => ({ ...s, ai_summary_json: { status: 'processing' } })))
     const { error, data } = await supabase.functions.invoke('process-exam', { body: { examId } })
     let topicsInserted = (data as any)?.topicsInserted ?? 0
+    // fallback to direct fetch if edge function call fails
     if (error) {
       const { data: session } = await supabase.auth.getSession()
       const token = session.session?.access_token
@@ -169,6 +171,7 @@ export function ExamDetailPage() {
             multiple 
             accept=".pdf,.ppt,.pptx" 
             onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+            // upload slide files to storage and create database entries
             const files = e.target.files
             if (!files || !examId) return
             const existing = (slides?.length ?? 0) + pending.length
@@ -202,9 +205,9 @@ export function ExamDetailPage() {
                     push({ title: 'Save failed', description: `${file.name}: ${insertErr.message}`, variant: 'error' })
                     errorCount++
                   } else {
-                    // Optimistically update the slides query immediately
                     qc.setQueryData<SlideRow[]>(['slides', examId], (old = []) => {
-                      const newSlide: SlideRow = {
+                      // add new slide to list immediately
+                    const newSlide: SlideRow = {
                         id: inserted.id,
                         file_url: inserted.file_url,
                         ai_summary_json: inserted.ai_summary_json,
@@ -212,7 +215,6 @@ export function ExamDetailPage() {
                       }
                       return [newSlide, ...old]
                     })
-                    // Remove from pending after optimistic update
                     setPending((p: PendingUpload[]) => p.filter((x) => x.id !== tempId))
                     successCount++
                   }
@@ -226,13 +228,10 @@ export function ExamDetailPage() {
               uploadPromises.push(uploadPromise)
             }
             
-            // Wait for all uploads to complete
             await Promise.all(uploadPromises)
             e.currentTarget.value = ''
 
-            // Refresh queries to ensure we have the latest data
             if (successCount > 0) {
-              // Invalidate to ensure fresh data, then refetch
               await qc.invalidateQueries({ queryKey: ['slides', examId] })
               await qc.refetchQueries({ queryKey: ['slides', examId] })
               
@@ -290,7 +289,6 @@ export function ExamDetailPage() {
                   push({ title: 'Deleted', variant: 'success' })
                   qc.invalidateQueries({ queryKey: ['slides', examId] })
                 }}>Delete</button>
-                {/* Row status pills removed per request; rely on top progress bar and completion toast */}
               </div>
             </div>
           ))}
